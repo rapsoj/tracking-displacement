@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "test-scrape-fa"
+version = "0.1.0"
+description = ""
+authors = ["KarimAED <karim@aedin.dev>"]
+readme = "README.md"
+packages = [{include = "scrape_fa"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+selenium = "^4.33.0"
+opencv-python = "^4.8.0"
+pillow = "^10.0.0"
+numpy = "^1.24.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
