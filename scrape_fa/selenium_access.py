@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 import time
+from dotenv import load_dotenv
 import os
 
 def enter_password(driver, password):
@@ -167,7 +168,7 @@ def setup_driver():
     time.sleep(1)
 
     # Enter password using the standalone function
-    if enter_password(driver, os.getenv("FA_PASSWORD")):
+    if enter_password(driver, os.getenv("FA_PW")):
         print("Password entered successfully.")
 
     # Find and click the submit button
@@ -266,6 +267,7 @@ def setup_label(driver):
     return "label"
 
 if __name__ == "__main__":
+    load_dotenv("../.env")
     driver = setup_driver()
     RASTER_LAYER = True
 

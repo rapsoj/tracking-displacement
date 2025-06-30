@@ -370,6 +370,21 @@ files = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.1.1"
+description = "Read key-value pairs from a .env file and set them as environment variables"
+category = "main"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "python_dotenv-1.1.1-py3-none-any.whl", hash = "sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc"},
+    {file = "python_dotenv-1.1.1.tar.gz", hash = "sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab"},
+]
+
+[package.extras]
+cli = ["click (>=5.0)"]
+
+[[package]]
 name = "selenium"
 version = "4.33.0"
 description = "Official Python bindings for Selenium WebDriver"
@@ -520,4 +535,4 @@ h11 = ">=0.9.0,<1"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "ab9de7a8a61b36d1b9a8e54ff78a1856d7af5629bdc7a2412c07feb8a97acbbc"
+content-hash = "41ec4ba4b3b9ad991023104ec07b0e749bf9690cad15c457ad99997b229ae321"
