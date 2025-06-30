@@ -262,7 +262,7 @@ def setup_feat(driver):
     return "feat"
 
 def setup_label(driver):
-    click_element_by_text(driver, "Displaced Shelters")
+    click_element_by_text(driver, "Tents")
     return "label"
 
 if __name__ == "__main__":
