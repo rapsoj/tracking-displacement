@@ -48,6 +48,33 @@ def group_coords(features, step=0.001):
                 grouped[(lon_group, lat_group)].append(feat)
     return grouped
 
+def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
+    from rasterio.warp import transform
+    # Transform WGS84 (lon, lat) to raster CRS
+    xs, ys = transform(wgs84_crs, src_crs, [lon, lon + step], [lat, lat + step])
+    x1, x2 = xs[0], xs[1]
+    y1, y2 = ys[0], ys[1]
+    try:
+        row1, col1 = src.index(x1, y1)
+        row2, col2 = src.index(x2, y2)
+        row_start, row_end = sorted([row1, row2])
+        col_start, col_end = sorted([col1, col2])
+        # Read RGB bands and convert to greyscale
+        data = src.read([1, 2, 3], window=((row_start, row_end), (col_start, col_end)))
+        if data.size == 0 or np.all(np.isnan(data)):
+            value = None
+        else:
+            r = data[0].astype(float)
+            g = data[1].astype(float)
+            b = data[2].astype(float)
+            grey = 0.2989 * r + 0.5870 * g + 0.1140 * b
+            value = grey
+            save_greyscale_and_label(grey, feats, lon, lat, step, out_dir)
+    except Exception:
+        value = None
+    if value is not None:
+        print(f"Region ({lon:.6f}, {lat:.6f}) to ({lon+step:.6f}, {lat+step:.6f}): Greyscale value: {value.shape}, Features: {len(feats)}")
+
 def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001):
     # Load GeoTIFF
     try:
@@ -69,35 +96,11 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001):
     print(f"GeoTIFF bounds: min_lon={bounds.left}, min_lat={bounds.bottom}, max_lon={bounds.right}, max_lat={bounds.top}")
 
     # Prepare coordinate transformer
-    from rasterio.warp import transform
     src_crs = src.crs
     wgs84_crs = 'EPSG:4326'
 
     for (lon, lat), feats in grouped.items():
-        # Transform WGS84 (lon, lat) to raster CRS
-        xs, ys = transform(wgs84_crs, src_crs, [lon, lon + step], [lat, lat + step])
-        x1, x2 = xs[0], xs[1]
-        y1, y2 = ys[0], ys[1]
-        try:
-            row1, col1 = src.index(x1, y1)
-            row2, col2 = src.index(x2, y2)
-            row_start, row_end = sorted([row1, row2])
-            col_start, col_end = sorted([col1, col2])
-            # Read RGB bands and convert to greyscale
-            data = src.read([1, 2, 3], window=((row_start, row_end), (col_start, col_end)))
-            if data.size == 0 or np.all(np.isnan(data)):
-                value = None
-            else:
-                r = data[0].astype(float)
-                g = data[1].astype(float)
-                b = data[2].astype(float)
-                grey = 0.2989 * r + 0.5870 * g + 0.1140 * b
-                value = grey
-                save_greyscale_and_label(grey, feats, lon, lat, step, out_dir)
-        except Exception:
-            value = None
-        if value is not None:
-            print(f"Region ({lon:.6f}, {lat:.6f}) to ({lon+step:.6f}, {lat+step:.6f}): Greyscale value: {value.shape}, Features: {len(feats)}")
+        process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs)
     src.close()
 
 @click.command()
