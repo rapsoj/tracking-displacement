@@ -32,46 +32,75 @@ This automated detection supports **Forensic Architecture's Cartography of Genoc
 
 ## Installation
 
-Ensure you have Python 3.7+ and install the required dependencies:
+Ensure you have Python 3.10+ and install the required dependencies:
 
 ```bash
 pip install rasterio click Pillow numpy
 ````
 
+Here’s the fully updated **Usage** section for your `README.md`, rewritten to match your actual code in `scrape_fa/coordinate_scanner.py`. It includes both **command-line** and **Python import** usage, reflecting the way your code is structured and how users are likely to interact with it.
+
 ---
 
 ## Usage
 
-Run the processing script with:
+You can run the image+label tile extraction either via **command-line interface (CLI)** or by importing the function directly in Python.
+
+---
+
+### Command-Line Interface
+
+From the root of your project, run:
 
 ```bash
-python your_script_name.py --geotiff path/to/satellite_image.tif --geojson path/to/tents.geojson --output output_directory --step 0.001
+python scrape_fa/coordinate_scanner.py \
+  --geotiff data/gaza_image.tif \
+  --geojson data/historic_tents.geojson \
+  --output output/tiles \
+  --step 0.001
 ```
 
 ### Arguments
 
-* `--geotiff`
-  Path to the GeoTIFF satellite image file.
+| Argument    | Description                                                                 |
+| ----------- | --------------------------------------------------------------------------- |
+| `--geotiff` | Path to the input GeoTIFF satellite image file.                             |
+| `--geojson` | Path to the GeoJSON file containing historic tent locations.                |
+| `--output`  | Output directory for generated greyscale image patches and label masks.     |
+| `--step`    | *(optional)* Step size for coordinate grouping in degrees (default: 0.001). |
 
-* `--geojson`
-  Path to the GeoJSON file containing historic tent point features.
+---
 
-* `--output`
-  Directory where the output greyscale and label PNG images will be saved.
+### Programmatic Usage (Python)
 
-* `--step` (optional)
-  Spatial grouping step size in degrees (default: 0.001).
+You can also call the same logic directly in Python, which is useful for notebooks, pipelines, or integration into training code.
+
+```python
+from scrape_fa.coordinate_scanner import scan_grouped_coordinates
+
+scan_grouped_coordinates(
+    geotiff_path="data/gaza_image.tif",
+    geojson_path="data/historic_tents.geojson",
+    out_dir="output/tiles",
+    step=0.001  # Optional: controls tiling granularity
+)
+```
 
 ---
 
 ## Output
 
-For each spatial window, two PNG images are created:
+For each spatial window (tile), two PNG files are saved in the output directory:
 
-* `{lon}_{lat}_feat.png`: Greyscale satellite image patch.
-* `{lon}_{lat}_label.png`: Corresponding binary mask with tent locations marked.
+* `{lon}_{lat}_feat.png` — A greyscale image patch extracted from the satellite image.
+* `{lon}_{lat}_label.png` — A binary mask where white pixels (255) indicate known tent locations.
+
+These pairs are ready for use in training CNN models for pixel-level displacement detection.
 
 ---
+
+Let me know if you'd like to follow up with a section for **how to train a model on these outputs** or how to convert this into a PyTorch `Dataset`.
+
 
 ## Context & Impact
 
