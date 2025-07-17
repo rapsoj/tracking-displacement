@@ -2,6 +2,7 @@ import rasterio
 import json
 import numpy as np
 import math
+from datetime import datetime
 from collections import defaultdict
 from rasterio.errors import RasterioIOError
 import os
@@ -21,8 +22,8 @@ def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
     for feat in feats:
         feat_lon, feat_lat = feat['geometry']['coordinates']
         # Linearly interpolate local coordinates in the window
-        local_col = int(round((feat_lon - lon) / step * (label.shape[1] - 1)))
-        local_row = int(round((feat_lat - lat) / step * (label.shape[0] - 1)))
+        local_col = int(round((feat_lon - (lon - step)) / (3 * step) * (label.shape[1] - 1)))
+        local_row = int(round((feat_lat - (lat - step)) / (3 * step) * (label.shape[0] - 1)))
         for dr in range(-1, 2):
             for dc in range(-1, 2):
                 rr = local_row + dr
@@ -45,13 +46,18 @@ def group_coords(features, step=0.001):
                 # Group to nearest step
                 lon_group = math.floor(lon / step) * step
                 lat_group = math.floor(lat / step) * step
-                grouped[(lon_group, lat_group)].append(feat)
+                for i in range(-1, 2):
+                    for j in range(-1, 2):
+                        # Adjust grouping to include neighboring pixels
+                        lon_group_adj = round(lon_group + i * step, 3)
+                        lat_group_adj = round(lat_group + j * step, 3)
+                        grouped[(lon_group_adj, lat_group_adj)].append(feat)
     return grouped
 
 def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
     from rasterio.warp import transform
     # Transform WGS84 (lon, lat) to raster CRS
-    xs, ys = transform(wgs84_crs, src_crs, [lon, lon + step], [lat, lat + step])
+    xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
     x1, x2 = xs[0], xs[1]
     y1, y2 = ys[0], ys[1]
     try:
@@ -61,7 +67,7 @@ def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
         col_start, col_end = sorted([col1, col2])
         # Read RGB bands and convert to greyscale
         data = src.read([1, 2, 3], window=((row_start, row_end), (col_start, col_end)))
-        if data.size == 0 or np.all(np.isnan(data)):
+        if data.size == 0 or np.all(np.isnan(data)) or np.all(data == 0):
             value = None
         else:
             r = data[0].astype(float)
@@ -75,7 +81,21 @@ def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
     if value is not None:
         print(f"Region ({lon:.6f}, {lat:.6f}) to ({lon+step:.6f}, {lat+step:.6f}): Greyscale value: {value.shape}, Features: {len(feats)}")
 
-def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001):
+def filter_tents_by_date(features, date_start, date_end):
+    filtered = []
+    for feat in features:
+        props = feat.get('properties', {})
+        tent_start = props.get('date_start')
+        if tent_start:
+            try:
+                tent_start_dt = datetime.strptime(tent_start[:10], '%Y-%m-%d')
+                if date_start <= tent_start_dt <= date_end:
+                    filtered.append(feat)
+            except Exception:
+                continue
+    return filtered
+
+def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, daterange_start=None, daterange_end=None):
     # Load GeoTIFF
     try:
         src = rasterio.open(geotiff_path)
@@ -87,6 +107,16 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001):
     with open(geojson_path, 'r') as f:
         geojson = json.load(f)
         features = geojson.get('features', [])
+
+    # Filter by date if specified
+    if daterange_start and daterange_end:
+        try:
+            date_start = datetime.strptime(daterange_start, '%Y%m%d')
+            date_end = datetime.strptime(daterange_end, '%Y%m%d')
+            features = filter_tents_by_date(features, date_start, date_end)
+            print(f"Filtered to {len(features)} features in date range.")
+        except Exception as e:
+            print(f"Date parsing error: {e}")
 
     grouped = group_coords(features, step)
     print(f"Found {len(grouped)} coordinate groups with tents.")
@@ -108,8 +138,10 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001):
 @click.option('--geojson', required=True, type=click.Path(exists=True), help='Path to the tent GeoJSON file')
 @click.option('--output', required=True, type=click.Path(), help='Output folder for images')
 @click.option('--step', default=0.001, show_default=True, type=float, help='Step size for grouping coordinates')
-def main(geotiff, geojson, output, step):
-    scan_grouped_coordinates(geotiff, geojson, output, step)
+@click.option('--daterange_start', required=False, type=str, help='Start date for tent filtering (YYYYMMDD)')
+@click.option('--daterange_end', required=False, type=str, help='End date for tent filtering (YYYYMMDD)')
+def main(geotiff, geojson, output, step, daterange_start, daterange_end):
+    scan_grouped_coordinates(geotiff, geojson, output, step, daterange_start, daterange_end)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
