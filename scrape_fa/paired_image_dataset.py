@@ -35,8 +35,24 @@ class PairedImageDataset(Dataset):
         label_map = {f.replace('_label.png', ''): f for f in label_files}
         # Only keep pairs that exist in both
         common_keys = set(feat_map.keys()) & set(label_map.keys())
-        pairs = [(k, feat_map[k], label_map[k]) for k in sorted(common_keys)]
-        return pairs
+        filtered_pairs = []
+        for k in sorted(common_keys):
+            feat_path = os.path.join(self.folder, feat_map[k])
+            label_path = os.path.join(self.folder, label_map[k])
+            # Check label image is not all black
+            with Image.open(label_path) as label_img:
+                label_arr = np.array(label_img)
+                if np.all(label_arr == 0):
+                    continue  # skip if label is all black
+            # Check feature image for >5% black pixels
+            with Image.open(feat_path) as feat_img:
+                feat_arr = np.array(feat_img)
+                total_pixels = feat_arr.size
+                black_pixels = np.sum(feat_arr == 0)
+                if black_pixels / total_pixels > 0.05:
+                    continue  # skip if >5% of feature is black
+            filtered_pairs.append((k, feat_map[k], label_map[k]))
+        return filtered_pairs
 
     def _get_min_label_size(self):
         min_w, min_h = None, None
