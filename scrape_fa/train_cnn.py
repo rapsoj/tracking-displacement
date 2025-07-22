@@ -9,7 +9,7 @@ from scrape_fa.show_overlay import overlay_images
 import matplotlib.pyplot as plt
 import datetime
 from scrape_fa.paired_image_dataset import PairedImageDataset
-from scrape_fa.unet_model import UNet
+from scrape_fa.simple_cnn import SimpleCNN
 
 
 def save_comparison_figure(feat_img, label_img, pred_img, save_path):
@@ -57,7 +57,14 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
     val_loader = DataLoader(val_set, batch_size=batch_size)
     test_loader = DataLoader(test_set, batch_size=batch_size)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Set device to GPU if available
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print('Using GPU:', torch.cuda.get_device_name(0))
+    else:
+        device = torch.device('cpu')
+        print('Using CPU')
+
     model = UNet(1, 1).to(device)
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
