@@ -65,7 +65,7 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
         device = torch.device('cpu')
         print('Using CPU')
 
-    model = UNet(1, 1).to(device)
+    model = SimpleCNN(1, 1).to(device)
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
