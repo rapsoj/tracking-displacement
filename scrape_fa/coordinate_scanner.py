@@ -13,7 +13,7 @@ def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
     import numpy as np
     from PIL import Image
     os.makedirs(out_dir, exist_ok=True)
-    fname = f"{lon:.3f}_{lat:.3f}_feat.png"
+    fname = f"{lon:.5f}_{lat:.5f}_feat.png"
     out_path = os.path.join(out_dir, fname)
     img = Image.fromarray(np.clip(grey, 0, 255).astype(np.uint8))
     img.save(out_path)
@@ -31,7 +31,7 @@ def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
                 if 0 <= rr < label.shape[0] and 0 <= cc < label.shape[1]:
                     label[rr, cc] = 255
     label_img = Image.fromarray(label[::-1, :])
-    label_fname = f"{lon:.3f}_{lat:.3f}_label.png"
+    label_fname = f"{lon:.5f}_{lat:.5f}_label.png"
     label_path = os.path.join(out_dir, label_fname)
     label_img.save(label_path)
 
@@ -49,8 +49,8 @@ def group_coords(features, step=0.001):
                 for i in range(-1, 2):
                     for j in range(-1, 2):
                         # Adjust grouping to include neighboring pixels
-                        lon_group_adj = round(lon_group + i * step, 3)
-                        lat_group_adj = round(lat_group + j * step, 3)
+                        lon_group_adj = round(lon_group + i * step, 5)
+                        lat_group_adj = round(lat_group + j * step, 5)
                         grouped[(lon_group_adj, lat_group_adj)].append(feat)
     return grouped
 

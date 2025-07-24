@@ -66,7 +66,7 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
         print('Using CPU')
 
     model = SimpleCNN(1, 1).to(device)
-    criterion = nn.L1Loss()
+    criterion = lambda x, y: ((x - y).abs() * (1 + y)).mean() + torch.relu(-x).mean() * 10.0
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
     # Create timestamped run directory
@@ -94,8 +94,7 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
             outputs = model(feats)
             # Predict only the center pixel of each 10x10 window
             # Crop outputs and labels to center 1 pixel
-            negative_loss = torch.relu(-outputs).mean() * 10.0  # scale penalty
-            loss = criterion(outputs, labels) + negative_loss
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
@@ -110,9 +109,6 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
                     comparison_path = os.path.join(run_dir, f"validation_{idx * batch_size}.png")
                     save_comparison_figure(feats[0].cpu(), labels[0].cpu(), outputs[0].cpu(), comparison_path)
                 loss = criterion(outputs, labels)
-                # Additional loss for negative values in outputs
-                negative_loss = torch.relu(-outputs).mean() * 10.0  # scale penalty
-                loss = loss + negative_loss
                 val_loss += loss.item()
         val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
         print(f"Epoch {epoch+1}/{epochs} - Train Loss: {total_loss/len(train_loader):.4f} - Validation Loss: {val_loss:.4f}")
