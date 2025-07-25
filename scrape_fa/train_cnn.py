@@ -66,7 +66,7 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
         print('Using CPU')
 
     model = SimpleCNN(1, 1).to(device)
-    criterion = lambda x, y: ((x - y).abs() * (1 + y)).mean() + torch.relu(-x).mean() * 10.0
+    criterion = lambda x, y: ((x - y).abs() * (1 + y)**2).mean() + torch.relu(-x).mean() * 10.0
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
     # Create timestamped run directory
