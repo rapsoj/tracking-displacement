@@ -34,3 +34,20 @@ class SimpleCNN(nn.Module):
         x = self.relu6(x)
         x = self.convend(x)
         return x
+
+    @classmethod
+    def from_pth(cls, file_name: str, map_location=None):
+        checkpoint = torch.load(file_name, map_location=map_location)
+
+        model_args = {}
+        if 'model_args' in checkpoint:
+            model_args = checkpoint["model_args"]
+
+        model = cls(**model_args)
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        else:
+            state_dict = checkpoint
+        model.load_state_dict(state_dict)
+        return model
+
