@@ -208,7 +208,7 @@ __marimo__/
 
 
 .python-version
-.DS_score
+.DS_Score
 labels/*
 feats/*
 data/
