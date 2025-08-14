@@ -5,13 +5,12 @@ import math
 from datetime import datetime
 from collections import defaultdict
 from rasterio.errors import RasterioIOError
+from rasterio.warp import transform
 import os
 from PIL import Image
 import click
 
 def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
-    import numpy as np
-    from PIL import Image
     os.makedirs(out_dir, exist_ok=True)
     fname = f"{lon:.3f}_{lat:.3f}_feat.png"
     out_path = os.path.join(out_dir, fname)
@@ -55,7 +54,6 @@ def group_coords(features, step=0.001):
     return grouped
 
 def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
-    from rasterio.warp import transform
     # Transform WGS84 (lon, lat) to raster CRS
     xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
     x1, x2 = xs[0], xs[1]
@@ -81,18 +79,26 @@ def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
     if value is not None:
         print(f"Region ({lon:.6f}, {lat:.6f}) to ({lon+step:.6f}, {lat+step:.6f}): Greyscale value: {value.shape}, Features: {len(feats)}")
 
-def filter_tents_by_date(features, date_start, date_end):
+def parse_date_safe(date_str):
+    """Parse YYYY-MM-DD or return None if missing/invalid."""
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def filter_tents_by_target_date(features, date_target):
+    """Keep tents where start <= target <= end, or end is None."""
     filtered = []
     for feat in features:
         props = feat.get('properties', {})
-        tent_start = props.get('date_start')
-        if tent_start:
-            try:
-                tent_start_dt = datetime.strptime(tent_start[:10], '%Y-%m-%d')
-                if date_start <= tent_start_dt <= date_end:
-                    filtered.append(feat)
-            except Exception:
-                continue
+        tent_start_dt = parse_date_safe(props.get('date_start'))
+        tent_end_dt = parse_date_safe(props.get('date_end'))
+
+        if tent_start_dt and tent_start_dt <= date_target:
+            if tent_end_dt is None or date_target <= tent_end_dt:
+                filtered.append(feat)
     return filtered
 
 def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, daterange_start=None, daterange_end=None):
@@ -138,10 +144,13 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, da
 @click.option('--geojson', required=True, type=click.Path(exists=True), help='Path to the tent GeoJSON file')
 @click.option('--output', required=True, type=click.Path(), help='Output folder for images')
 @click.option('--step', default=0.001, show_default=True, type=float, help='Step size for grouping coordinates')
-@click.option('--daterange_start', required=False, type=str, help='Start date for tent filtering (YYYYMMDD)')
-@click.option('--daterange_end', required=False, type=str, help='End date for tent filtering (YYYYMMDD)')
-def main(geotiff, geojson, output, step, daterange_start, daterange_end):
-    scan_grouped_coordinates(geotiff, geojson, output, step, daterange_start, daterange_end)
+@click.option('--date_target', required=False, type=str, help='Date of satellite image used for tent filtering (YYYYMMDD)')
+def main(geotiff, geojson, output, step, date_target):
+    scan_grouped_coordinates(geotiff, geojson, output, step, date_target)
 
 if __name__ == '__main__':
     main()
+
+### TODO: Check if we are only collecting images where a large percent of tents have date_start on date
+### TODO: Obtain date_target from the tif file name
+### TODO: Filter out examples where the tif file is significantly no data
