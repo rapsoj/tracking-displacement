@@ -15,7 +15,7 @@ class PairedImageDataset(Dataset):
         if label_transform is None:
             class LabelBlur:
                 def __call__(self, img):
-                    return img.filter(ImageFilter.GaussianBlur(radius=7))
+                    return img.filter(ImageFilter.GaussianBlur(radius=3))
             label_transform = transforms.Compose([
                 LabelBlur(),
                 transforms.ToTensor(),
@@ -70,9 +70,11 @@ class PairedImageDataset(Dataset):
         return min_w, min_h
 
     def __len__(self):
+        # 8 augmentations per pair (4 rotations x 2 flips)
         return len(self.pairs)
 
     def __getitem__(self, idx):
+        # Determine which pair and which augmentation
         k, feat_name, label_name = self.pairs[idx]
         feat_path = os.path.join(self.folder, feat_name)
         label_path = os.path.join(self.folder, label_name)
