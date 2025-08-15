@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 class SimpleCNN(nn.Module):
     def __init__(self, n_channels, n_classes=1, kernel_size=3):
@@ -36,12 +35,12 @@ class SimpleCNN(nn.Module):
         return x
 
     @classmethod
-    def from_pth(cls, file_name: str, map_location=None):
+    def from_pth(cls, file_name: str, map_location=None, model_args=None):
         checkpoint = torch.load(file_name, map_location=map_location)
 
-        model_args = {}
+        model_args = model_args or {}
         if 'model_args' in checkpoint:
-            model_args = checkpoint["model_args"]
+            model_args = model_args | checkpoint["model_args"]
 
         model = cls(**model_args)
         if 'state_dict' in checkpoint:

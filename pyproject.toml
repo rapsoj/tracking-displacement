@@ -19,6 +19,7 @@ click = "^8.2.1"
 torch = "^2.7.1"
 torchvision = "^0.22.1"
 google-api-python-client = "^2.176.0"
+scipy = "1.15.3"
 
 
 [build-system]
