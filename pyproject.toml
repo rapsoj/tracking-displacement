@@ -1,8 +1,8 @@
-[tool.poetry]
-name = "test-scrape-fa"
+[project]
+name = "scrape-fa"
 version = "0.1.0"
 description = ""
-authors = ["KarimAED <karim@aedin.dev>"]
+authors = [{name = "Karim Alaa El-Din", email = "karim@aedin.dev"}]
 readme = "README.md"
 packages = [{include = "scrape_fa"}]
 
@@ -21,6 +21,9 @@ torchvision = "^0.22.1"
 google-api-python-client = "^2.176.0"
 scipy = "1.15.3"
 
+[project.scripts]
+tif-loader = "scrape_fa.tif_loader:tif_loader"
+coordinate-scanner = "scrape_fa.coordinate_scanner:coordinate_scanner"
 
 [build-system]
 requires = ["poetry-core"]

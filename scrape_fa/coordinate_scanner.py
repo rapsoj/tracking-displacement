@@ -228,7 +228,7 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, da
 @click.option('--geojson', required=True, type=click.Path(exists=True), help='Path to the tent GeoJSON file')
 @click.option('--output', required=True, type=click.Path(), help='Output folder for images')
 @click.option('--step', default=0.001, show_default=True, type=float, help='Step size for grouping coordinates')
-def main(geotiff_dir, geojson, output, step):
+def coordinate_scanner(geotiff_dir, geojson, output, step):
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
         print(f"No .tif files found in {geotiff_dir}")
@@ -243,7 +243,7 @@ def main(geotiff_dir, geojson, output, step):
         scan_grouped_coordinates(tif_path, geojson, output, step, date_target)
 
 if __name__ == "__main__":
-    main()
+    coordinate_scanner()
 
 # EXAMPLE CLI USAGE:
 # python scrape_fa/coordinate_scanner.py \

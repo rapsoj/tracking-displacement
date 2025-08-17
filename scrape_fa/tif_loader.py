@@ -1,10 +1,12 @@
 import io
 import os
-import re
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+import click
 
-def download_tif_files_from_public_folder(folder_id, search_string, download_dir='.'):
+from .util.env_loader import require_env_file
+
+def download_tif_files_from_public_folder(search_string: str, download_dir='.'):
     """
     Download all .tif files containing search_string from a public Google Drive folder using Google API.
     Args:
@@ -12,6 +14,7 @@ def download_tif_files_from_public_folder(folder_id, search_string, download_dir
         search_string (str): String to search for in file names.
         download_dir (str): Directory to save downloaded files.
     """
+    folder_id = os.getenv("GDRIVE_ID")
     api_key = os.getenv('GOOGLE_API_KEY')
     if not api_key:
         try:
@@ -67,11 +70,21 @@ def download_tif_files_from_public_folder(folder_id, search_string, download_dir
             status, done = downloader.next_chunk()
         print(f"Downloaded {file_name}")
 
+
+@click.command(context_settings=dict(help_option_names=['-h', '--help']))
+@click.argument('search_string')
+@click.option('--download-dir', default='.', show_default=True,
+              type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              help='Directory to save files')
+@require_env_file(["GOOGLE_API_KEY", "GDRIVE_ID"])
+def tif_loader(search_string: str, download_dir: str) -> None:
+    """Download .tif files from a public Google Drive folder.
+
+    FOLDER_ID is the Google Drive folder ID. SEARCH_STRING filters file names.
+    """
+    download_tif_files_from_public_folder(search_string, download_dir)
+
+
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Download .tif files from a public Google Drive folder.")
-    parser.add_argument('folder_id', help='Google Drive folder ID')
-    parser.add_argument('search_string', help='String to search for in file names')
-    parser.add_argument('--download_dir', default='.', help='Directory to save files')
-    args = parser.parse_args()
-    download_tif_files_from_public_folder(args.folder_id, args.search_string, args.download_dir)
+    tif_loader()
+
