@@ -1,0 +1,8 @@
+geotiff_dir: tiff_files
+geojson: tents-2025-07-24_115943.geojson
+hdf5: processed_data.h5
+step: 0.0005
+quality_thresholds:
+  start_threshold: 0.
+  max_missing_end: 1.
+  min_valid_fraction: 0.9
