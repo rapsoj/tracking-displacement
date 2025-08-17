@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import rasterio
 import json
 import numpy as np
 import math
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 from rasterio.errors import RasterioIOError
 from rasterio.warp import transform
@@ -10,8 +12,16 @@ import os
 import glob
 from PIL import Image
 import click
+from typing import Any
 
-def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
+def save_greyscale_and_label(
+    grey: np.ndarray,
+    feats: list[dict[str, Any]],
+    lon: float,
+    lat: float,
+    step: float,
+    out_dir: str
+) -> None:
     os.makedirs(out_dir, exist_ok=True)
     fname = f"{lon:.5f}_{lat:.5f}_feat.png"
     out_path = os.path.join(out_dir, fname)
@@ -36,7 +46,10 @@ def save_greyscale_and_label(grey, feats, lon, lat, step, out_dir):
     label_img.save(label_path)
 
 
-def group_coords(features, step=0.001):
+def group_coords(
+    features: list[dict[str, Any]],
+    step: float = 0.001
+) -> dict[tuple[float, float], list[dict[str, Any]]]:
     grouped = defaultdict(list)
     for feat in features:
         geom = feat.get('geometry', {})
@@ -56,7 +69,16 @@ def group_coords(features, step=0.001):
     return grouped
 
 
-def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
+def process_group(
+    src: rasterio.io.DatasetReader,
+    feats: list[dict[str, Any]],
+    lon: float,
+    lat: float,
+    step: float,
+    out_dir: str,
+    src_crs: Any,
+    wgs84_crs: Any
+) -> None:
     # Transform WGS84 (lon, lat) to raster CRS
     xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
     x1, x2 = xs[0], xs[1]
@@ -83,7 +105,7 @@ def process_group(src, feats, lon, lat, step, out_dir, src_crs, wgs84_crs):
         print(f"Region ({lon:.6f}, {lat:.6f}) to ({lon+step:.6f}, {lat+step:.6f}): Greyscale value: {value.shape}, Features: {len(feats)}")
 
 
-def parse_date_safe(date_str):
+def parse_date_safe(date_str: str | None) -> date | None:
     """Parse YYYY-MM-DD or return None if missing/invalid."""
     if not date_str:
         return None
@@ -93,7 +115,10 @@ def parse_date_safe(date_str):
         return None
 
 
-def filter_tents_by_target_date(features, date_target):
+def filter_tents_by_target_date(
+    features: list[dict[str, Any]],
+    date_target: date
+) -> list[dict[str, Any]]:
     """Keep tents where start <= target <= end, or end is None."""
     filtered = []
     for feat in features:
@@ -107,7 +132,7 @@ def filter_tents_by_target_date(features, date_target):
     return filtered
 
 
-def extract_date_from_filename(filename):  # ### CHANGED: new helper
+def extract_date_from_filename(filename: str) -> str | None:  # ### CHANGED: new helper
     """Extract first numeric sequence (YYYYMMDD) from a filename split by underscores."""
     parts = os.path.splitext(os.path.basename(filename))[0].split("_")
     for p in parts:
@@ -116,8 +141,17 @@ def extract_date_from_filename(filename):  # ### CHANGED: new helper
     return None
 
 
-def is_high_quality_tile(feats, date_target_str, src, lon, lat, step=0.001,
-                         start_threshold=0.2, max_missing_end=0.2, min_valid_fraction=0.9):
+def is_high_quality_tile(
+    feats: list[dict[str, Any]],
+    date_target_str: str,
+    src: rasterio.io.DatasetReader,
+    lon: float,
+    lat: float,
+    step: float = 0.001,
+    start_threshold: float = 0.2,
+    max_missing_end: float = 0.2,
+    min_valid_fraction: float = 0.9
+) -> bool:
     """
     Determine if a tile is high quality based on:
       1. Fraction of tents starting on the target date
@@ -180,7 +214,13 @@ def is_high_quality_tile(feats, date_target_str, src, lon, lat, step=0.001,
     return True
 
 
-def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, date_target=None):
+def scan_grouped_coordinates(
+    geotiff_path: str,
+    geojson_path: str,
+    out_dir: str,
+    step: float = 0.001,
+    date_target: str | None = None
+) -> None:
     try:
         src = rasterio.open(geotiff_path)
     except RasterioIOError as e:
@@ -228,7 +268,7 @@ def scan_grouped_coordinates(geotiff_path, geojson_path, out_dir, step=0.001, da
 @click.option('--geojson', required=True, type=click.Path(exists=True), help='Path to the tent GeoJSON file')
 @click.option('--output', required=True, type=click.Path(), help='Output folder for images')
 @click.option('--step', default=0.001, show_default=True, type=float, help='Step size for grouping coordinates')
-def coordinate_scanner(geotiff_dir, geojson, output, step):
+def coordinate_scanner(geotiff_dir: str, geojson: str, output: str, step: float) -> None:
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
         print(f"No .tif files found in {geotiff_dir}")
