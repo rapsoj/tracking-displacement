@@ -3,6 +3,7 @@ import os
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import click
+import yaml
 
 from .util.env_loader import require_env_file
 
@@ -72,19 +73,34 @@ def download_tif_files_from_public_folder(search_string: str, download_dir='.'):
 
 
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
-@click.argument('search_string')
-@click.option('--download-dir', default='.', show_default=True,
+@click.argument('config', type=click.Path(exists=True, dir_okay=False))
+@click.option('--download-dir', default=None, show_default=True,
               type=click.Path(file_okay=False, dir_okay=True, writable=True),
-              help='Directory to save files')
+              help='Directory to save files (overrides config)')
 @require_env_file(["GOOGLE_API_KEY", "GDRIVE_ID"])
-def tif_loader(search_string: str, download_dir: str) -> None:
-    """Download .tif files from a public Google Drive folder.
-
-    FOLDER_ID is the Google Drive folder ID. SEARCH_STRING filters file names.
+def tif_loader(config: str, download_dir: str | None) -> None:
     """
-    download_tif_files_from_public_folder(search_string, download_dir)
+    Download .tif files from a public Google Drive folder for each search string in a YAML config file.
+    The YAML file must have a section:
+    loading:
+      files:
+        - search_string_1
+        - search_string_2
+    Optionally, you can specify download_dir in the config or via --download-dir.
+    """
+    with open(config, 'r') as f:
+        cfg = yaml.safe_load(f)
+    search_strings = cfg.get('loading', {}).get('files', [])
+    if not search_strings:
+        print("No search strings found in config under loading/files.")
+        return
+    # Determine download directory
+    config_dir = cfg.get('geotiff_dir', '.')
+    out_dir = download_dir if download_dir is not None else config_dir
+    for search_string in search_strings:
+        print(f"\n=== Downloading for search string: {search_string} ===")
+        download_tif_files_from_public_folder(search_string, out_dir)
 
 
 if __name__ == "__main__":
     tif_loader()
-

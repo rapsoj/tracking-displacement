@@ -74,8 +74,6 @@ def main(folder, train_frac, val_frac, batch_size, epochs):
     run_dir = os.path.join('runs', timestamp)
     os.makedirs(run_dir, exist_ok=True)
 
-    val_img_int = 5
-
     for epoch in range(epochs):
         model.train()
         total_loss = 0

@@ -107,7 +107,7 @@ def process_group(
             local_row = int(round((feat_lat - (lat - step)) / (3 * step) * (label.shape[0] - 1)))
             for dr in range(-1, 2):
                 for dc in range(-1, 2):
-                    rr = local_row + dr
+                    rr = (label.shape[0] - local_row) + dr
                     cc = local_col + dc
                     if 0 <= rr < label.shape[0] and 0 <= cc < label.shape[1]:
                         label[rr, cc] = 255
@@ -325,7 +325,7 @@ def cli(config):
     """
     with open(config, 'r') as f:
         params = yaml.safe_load(f)
-    required = ['geotiff_dir', 'geojson', 'hdf5', 'step', 'quality_thresholds']
+    required = ['geotiff_dir', 'geojson', 'hdf5', 'processing']
     for k in required:
         if k not in params:
             raise click.ClickException(f"Missing required config key: {k}")
@@ -333,8 +333,7 @@ def cli(config):
         params['geotiff_dir'],
         params['geojson'],
         params['hdf5'],
-        params['step'],
-        params['quality_thresholds']
+        **params['processing']
     )
 
 
@@ -349,6 +348,7 @@ def coordinate_scanner(geotiff_dir: str, geojson: str, hdf5: str, step: float, q
         if not date_target:
             print(f"Skipping {tif_path} (no date found in filename).")
             continue
+
         print(f"Processing {tif_path} with date {date_target}...")
         scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target)
     hdf5_writer.write()

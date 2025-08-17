@@ -52,7 +52,42 @@ class PairedImageDataset(Dataset):
     def close(self):
         self.h5.close()
 
-    def show(self, idx: int) -> None:
+    def show(self, idx: int, overlay: bool = False) -> None:
+        if overlay:
+            self.show_overlay(idx)
+        else:
+            self.show_split(idx)
+
+    def show_overlay(self, idx: int) -> None:
+        sample = self[idx]
+        feature = sample['feature']
+        label = sample['label']
+        meta = sample['meta']
+
+        if isinstance(feature, torch.Tensor):
+            arr_feat = feature.squeeze().cpu().numpy()
+        else:
+            arr_feat = np.array(feature)
+        if isinstance(label, torch.Tensor):
+            arr_label = label.squeeze().cpu().numpy()
+        else:
+            arr_label = np.array(label)
+        fig, axes = plt.subplots(1, 2, figsize=(10, 6), gridspec_kw={'width_ratios': [1, 6]})
+        axes[0].axis('off')
+        meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
+        meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
+        meta_text = '\n'.join(f"{k}: {v}" for k, v in meta.items())
+        axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
+                    ha='left', va='top', transform=axes[0].transAxes)
+        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
+        axes[1].set_title('Data')
+        axes[1].axis('off')
+
+        plt.imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label / np.max(arr_label), interpolation='none')
+        plt.tight_layout()
+        plt.show()
+
+    def show_split(self, idx: int) -> None:
         sample = self[idx]
         feature = sample['feature']
         label = sample['label']
@@ -70,16 +105,16 @@ class PairedImageDataset(Dataset):
         # Left: meta text
         axes[0].axis('off')
         meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        meta["origin_image"] = meta["origin_image"].rsplit("_", 6)[0]
+        meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
         meta_text = '\n'.join(f"{k}: {v}" for k, v in meta.items())
         axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
                     ha='left', va='top', transform=axes[0].transAxes)
         # Center: feature image
-        axes[1].imshow(arr_feat, cmap='gray')
+        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
         axes[1].set_title('Feature')
         axes[1].axis('off')
         # Right: label image
-        axes[2].imshow(arr_label, cmap='gray')
+        axes[2].imshow(arr_label[::-1, :], cmap='gray')
         axes[2].set_title('Label')
         axes[2].axis('off')
         plt.tight_layout()
@@ -95,4 +130,6 @@ if __name__ == "__main__":
     ds = PairedImageDataset("processed_data.h5")
 
     print(f"Length: {len(ds)}")
-    ds.show(1)
+    for i in range(10):
+        j = np.random.randint(0, len(ds))
+        ds.show(j, overlay=True)
