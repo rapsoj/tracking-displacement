@@ -16,6 +16,10 @@ from rasterio.errors import RasterioIOError
 from rasterio.warp import transform
 from typing import Any
 
+from scrape_fa.util.logging_config import setup_logging
+
+LOGGER = setup_logging('coordinate_scanner')
+
 def save_greyscale_and_label(
     grey: np.ndarray,
     feats: list[dict[str, Any]],
@@ -121,7 +125,7 @@ def process_group(
         }
         return grey.astype(np.float32), label, meta
     except Exception as e:
-        logging.exception("Failed to process group")
+        LOGGER.exception("Failed to process group")
         return None, None, None
 
 
@@ -267,8 +271,8 @@ def scan_grouped_coordinates(
 ) -> None:
     try:
         src = rasterio.open(geotiff_path)
-    except RasterioIOError as e:
-        print(f"Error opening GeoTIFF: {e}")
+    except RasterioIOError:
+        LOGGER.exception(f"Error opening GeoTIFF")
         return
 
     with open(geojson_path, 'r') as f:
@@ -279,15 +283,16 @@ def scan_grouped_coordinates(
         try:
             date_obj = datetime.strptime(date_target, '%Y%m%d').date()
             features = filter_tents_by_target_date(features, date_obj)
-            print(f"[{os.path.basename(geotiff_path)}] Filtered to {len(features)} features for date {date_target}.")
-        except Exception as e:
-            print(f"Date parsing error for {geotiff_path}: {e}")
+            LOGGER.info(f"[{os.path.basename(geotiff_path)}] Filtered to {len(features)} features for date {date_target}.")
+        except Exception:
+            LOGGER.exception(f"Date parsing error for {geotiff_path}")
+            return
 
     grouped = group_coords(features, step)
-    print(f"[{os.path.basename(geotiff_path)}] Found {len(grouped)} coordinate groups with tents.")
+    LOGGER.info(f"[{os.path.basename(geotiff_path)}] Found {len(grouped)} coordinate groups with tents.")
 
     bounds = src.bounds
-    print(f"GeoTIFF bounds: min_lon={bounds.left}, min_lat={bounds.bottom}, max_lon={bounds.right}, max_lat={bounds.top}")
+    LOGGER.info(f"GeoTIFF bounds: min_lon={bounds.left}, min_lat={bounds.bottom}, max_lon={bounds.right}, max_lat={bounds.top}")
 
     src_crs = src.crs
     wgs84_crs = 'EPSG:4326'
@@ -303,7 +308,7 @@ def scan_grouped_coordinates(
             hdf5_writer.add_entry(grey, label, meta)
 
     if not high_quality_found:
-        print(f"Warning: No valid high-quality tiles found in {os.path.basename(geotiff_path)}")
+        LOGGER.warn(f"No valid high-quality tiles found in {os.path.basename(geotiff_path)}")
 
     src.close()
 
@@ -340,22 +345,22 @@ def cli(config):
 def coordinate_scanner(geotiff_dir: str, geojson: str, hdf5: str, step: float, quality_thresholds: dict[str, Any]) -> None:
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
-        print(f"No .tif files found in {geotiff_dir}")
+        LOGGER.error(f"No .tif files found in {geotiff_dir}")
         return
     hdf5_writer = HDF5Writer(hdf5)
     for tif_path in tif_files:
         date_target = extract_date_from_filename(tif_path)
         if not date_target:
-            print(f"Skipping {tif_path} (no date found in filename).")
+            LOGGER.warn(f"Skipping {tif_path} (no date found in filename).")
             continue
 
-        print(f"Processing {tif_path} with date {date_target}...")
+        LOGGER.info(f"Processing {tif_path} with date {date_target}...")
         scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target)
     hdf5_writer.write()
-    print(f"Saved dataset to {hdf5}")
+    LOGGER.info(f"Saved dataset to {hdf5}")
 
 if __name__ == "__main__":
     cli()
 
 # EXAMPLE CLI USAGE:
-# python scrape_fa/coordinate_scanner.py config.yml
+# poetry run coordinate-scanner config.yaml
