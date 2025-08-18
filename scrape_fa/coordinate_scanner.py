@@ -19,6 +19,8 @@ from typing import Any
 from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging('coordinate_scanner')
+WIDTH = None
+HEIGHT = None
 
 def save_greyscale_and_label(
     grey: np.ndarray,
@@ -54,7 +56,7 @@ def save_greyscale_and_label(
 
 def group_coords(
     features: list[dict[str, Any]],
-    step: float = 0.001
+    step: float
 ) -> dict[tuple[float, float], list[dict[str, Any]]]:
     grouped = defaultdict(list)
     for feat in features:
@@ -86,6 +88,8 @@ def process_group(
     src_crs: Any,
     wgs84_crs: Any
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    # ToDo: make this caching less hacky
+    global WIDTH, HEIGHT
     # Transform WGS84 (lon, lat) to raster CRS
     xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
     x1, x2 = xs[0], xs[1]
@@ -95,6 +99,15 @@ def process_group(
         row2, col2 = src.index(x2, y2)
         row_start, row_end = sorted([row1, row2])
         col_start, col_end = sorted([col1, col2])
+        if WIDTH is None:
+            WIDTH = col_end - col_start
+        elif (col_end - col_start) != WIDTH:
+            col_end = col_start + WIDTH
+        if HEIGHT is None:
+            HEIGHT = row_end - row_start
+        elif (row_end - row_start) != HEIGHT:
+            row_end = row_start + HEIGHT
+
         # Read RGB bands and convert to greyscale
         data = src.read([1, 2, 3], window=((row_start, row_end), (col_start, col_end)))
         if data.size == 0 or np.all(np.isnan(data)) or np.all(data == 0):
@@ -171,10 +184,10 @@ def is_high_quality_tile(
     src: rasterio.io.DatasetReader,
     lon: float,
     lat: float,
-    step: float = 0.001,
-    start_threshold: float = 0.,
-    max_missing_end: float = 1.,
-    min_valid_fraction: float = 0.9
+    step: float,
+    start_threshold: float,
+    max_missing_end: float,
+    min_valid_fraction: float
 ) -> bool:
     """
     Determine if a tile is high quality based on:
@@ -239,12 +252,14 @@ def is_high_quality_tile(
 
 
 class HDF5Writer:
+
     def __init__(self, hdf5_path: str):
         self.hdf5_path = hdf5_path
         self.file = h5py.File(self.hdf5_path, 'w')
         self.greyscale_group = self.file.create_group('feature')
         self.label_group = self.file.create_group('label')
         self.tile_idx = 0
+
     def add_entry(self, grey: np.ndarray, label: np.ndarray, meta: dict[str, Any]):
         tile_name = f"tile_{self.tile_idx:05d}"
         gset = self.greyscale_group.create_dataset(tile_name, data=grey, compression='gzip')
@@ -257,6 +272,7 @@ class HDF5Writer:
             ds.attrs['lat_min'] = round(meta['lat_min'], 5)
             ds.attrs['lat_max'] = round(meta['lat_max'], 5)
         self.tile_idx += 1
+
     def write(self):
         self.file.close()
 

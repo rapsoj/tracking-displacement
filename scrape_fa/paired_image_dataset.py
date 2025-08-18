@@ -1,4 +1,3 @@
-import os
 from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 import torch
@@ -120,10 +119,21 @@ class PairedImageDataset(Dataset):
         plt.tight_layout()
         plt.show()
 
-# Example usage:
-# dataset = PairedImageDataset('/path/to/file.hdf5')
-# sample = dataset[0]
-# img, label, meta = sample['feature'], sample['label'], sample['meta']
+    @classmethod
+    def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str):
+        """
+        Create a new dataset from predictions, saving them to an HDF5 file.
+        """
+        with h5py.File(output_path, 'w') as h5f:
+            feat_group = h5f.create_group('feature')
+            label_group = h5f.create_group('label')
+            for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
+                key = f"sample_{i}"
+                feat_group.create_dataset(key, data=sample['feature'].cpu().numpy())
+                label_group.create_dataset(key, data=pred.cpu().numpy())
+                for attr, value in sample['meta'].items():
+                    feat_group[key].attrs[attr] = value
+        return cls(output_path, label_transform=transforms.ToTensor(), feat_transform=base_ds.feat_transform)
 
 
 if __name__ == "__main__":

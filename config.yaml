@@ -24,7 +24,7 @@ processing:
     min_valid_fraction: 0.9
 training:
   epochs: 1000
-  batch_size: 4
+  batch_size: 8
   learning_rate: 1e-3
-  training_frac: 0.7
-  validation_frac: 0.15
+  training_frac: 0.3
+  validation_frac: 0.05
