@@ -166,6 +166,8 @@ def filter_tents_by_target_date(
         if tent_start_dt and tent_start_dt <= date_target:
             if tent_end_dt is None or date_target <= tent_end_dt:
                 filtered.append(feat)
+        elif tent_end_dt is None and date_target - tent_start_dt <= timedelta(days=30):
+                filtered.append(feat)
     return filtered
 
 
