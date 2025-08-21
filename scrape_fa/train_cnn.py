@@ -1,7 +1,10 @@
+from __future__ import annotations
+from pathlib import Path
+import shutil
+
 import click
 import torch
 from torch.utils.data import DataLoader, Subset
-import random
 import torch.optim as optim
 import os
 import yaml
@@ -27,33 +30,6 @@ def custom_collate(batch):
 
     return collated_dict
 
-def load_and_split_ds(ds_folder: str, train_frac: float, val_frac: float, batch_size: int, shuffle: bool = True) -> tuple[DataLoader, DataLoader, DataLoader]:
-    dataset = PairedImageDataset(ds_folder)
-    indices = list(range(len(dataset)))
-
-    if shuffle:
-        random.shuffle(indices)
-
-    n = len(indices)
-    n_train = int(n * train_frac)
-    LOGGER.info(f"Training set size: {n_train}")
-    n_val = int(n * val_frac)
-    LOGGER.info(f"Validation set size: {n_val}")
-    n_test = n - n_train - n_val
-    LOGGER.info(f"Test set size: {n_test}")
-    train_idx = indices[:n_train]
-    val_idx = indices[n_train:n_train+n_val]
-    test_idx = indices[n_train+n_val:]
-    train_set = Subset(dataset, train_idx)
-    val_set = Subset(dataset, val_idx)
-    test_set = Subset(dataset, test_idx)
-
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=custom_collate)
-    val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
-    test_loader = DataLoader(test_set, batch_size=batch_size, collate_fn=custom_collate)
-
-    return train_loader, val_loader, test_loader
-
 @click.command()
 @click.argument('config', type=click.Path(exists=True))
 def cli(config: str) -> None:
@@ -68,9 +44,7 @@ def cli(config: str) -> None:
         **params['training']
     )
 
-def train(folder: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float) -> None:
-    # Load and shuffle dataset
-    train_loader, val_loader, test_loader = load_and_split_ds(folder, training_frac, validation_frac, batch_size, shuffle=True)
+def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, checkpoint: str | None = None) -> None:
 
     # Set device to GPU if available
     if torch.cuda.is_available():
@@ -80,34 +54,51 @@ def train(folder: str, training_frac: float, validation_frac: float, batch_size:
         device = torch.device('cpu')
         LOGGER.info('Using CPU')
 
-    model = SimpleCNN(1, 1).to(device)
+    if checkpoint:
+        checkpoint = Path(checkpoint)
+        model = SimpleCNN.from_pth(checkpoint, model_args={"n_channels": 1, "n_classes": 1}).to(device)
+        hdf5_path_obj = Path(hdf5_path)
+
+        save_loc = checkpoint.parent
+    else:
+        model = SimpleCNN(1, 1).to(device)
+        save_loc = None
+
+    # Load and shuffle dataset
+    dataset = PairedImageDataset(hdf5_path)
+    splits = [training_frac, validation_frac, 1-training_frac-validation_frac]
+    (train_set, val_set, test_set), idcs_list = dataset.create_subsets(splits, shuffle=True, save_loc=save_loc)
+    train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate)
+    val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
+    test_loader = DataLoader(test_set, batch_size=batch_size, collate_fn=custom_collate)
+
+    LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
+
     criterion = lambda x, y: ((x - y).abs() * (1 + y)**2).mean() + torch.relu(-x).mean() * 10.0
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Create timestamped run directory
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     run_dir = os.path.join('runs', timestamp)
     os.makedirs(run_dir, exist_ok=True)
+    shutil.copy(hdf5_path, os.path.join(run_dir, 'dataset.h5'))
+
+    # caching splits for future use
+    with open(os.path.join(run_dir, "splits.csv"), "w") as split_file:
+        split_file.write(",".join([str(split) for split in splits]) + "\n")
+        for idcs in idcs_list:
+            split_file.write(",".join([str(idx) for idx in idcs]) + "\n")
+
+    best_eval = float('inf')
 
     for epoch in range(epochs):
         model.train()
         total_loss = 0
         for entry in train_loader:
-            # ToDo: create a custom collate function for this
             feats, labels = entry["feature"].to(device), entry["label"].to(device)
 
-            # fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-            # plt.sca(axs[0])
-            # im_1 = plt.imshow(feats[0].cpu().squeeze(), cmap='gray')
-            # plt.colorbar(im_1, ax=axs[0])
-            # plt.sca(axs[1])
-            # im_2 = plt.imshow(labels[0].cpu().squeeze(), cmap='gray')
-            # fig.colorbar(im_2, ax=axs[1])
-            # plt.show()
             optimizer.zero_grad()
             outputs = model(feats)
-            # Predict only the center pixel of each 10x10 window
-            # Crop outputs and labels to center 1 pixel
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -122,27 +113,28 @@ def train(folder: str, training_frac: float, validation_frac: float, batch_size:
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
         val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
+        if val_loss < best_eval:
+            model_path = os.path.join(run_dir, 'best_model.pth')
+            torch.save(model.state_dict(), model_path)
+            LOGGER.info(f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}.")
+            best_eval = val_loss
         LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {total_loss/len(train_loader):.4f} - Validation Loss: {val_loss:.4f}")
 
     # Create timestamped run directory
     # Save trained model
-    model_path = os.path.join(run_dir, 'trained_cnn.pth')
-    torch.save(model.state_dict(), model_path)
-    LOGGER.info(f"Model saved to {model_path}")
     # Run through test set and save overlays
     dataset_folder = run_dir
     model.eval()
     output_combined = None
     with torch.no_grad():
-        for entry in test_loader.dataset:
+        output_combined = []
+        for entry in test_set:
+            feats = entry["feature"]
             feats = feats.to(device)
             outputs = model(feats)
-            if output_combined is None:
-                output_combined = outputs.cpu()
-            else:
-                output_combined = torch.cat((output_combined, outputs.cpu()), dim=0)
+            output_combined.append(outputs.cpu().squeeze())
 
-        PairedImageDataset.from_predictions(test_loader.dataset, output_combined, os.path.join(run_dir, 'test_predictions.h5'))
+        PairedImageDataset.from_predictions(test_set, output_combined, os.path.join(run_dir, 'test_predictions.h5'))
 
     LOGGER.info("Test overlays and comparison figures saved.")
 

@@ -1,5 +1,5 @@
 geotiff_dir: tiff_files
-geojson: tents-2025-07-24_115943.geojson
+geojson: tents-2025-08-18_112914.geojson
 hdf5: processed_data.h5
 artifact_dir: runs
 loading:
@@ -23,8 +23,9 @@ processing:
     max_missing_end: 0.2
     min_valid_fraction: 0.9
 training:
-  epochs: 1000
+  checkpoint: null
+  epochs: 10000
   batch_size: 8
-  learning_rate: 1e-3
-  training_frac: 0.3
-  validation_frac: 0.05
+  learning_rate: 0.0005
+  training_frac: 0.7
+  validation_frac: 0.15

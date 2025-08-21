@@ -1,3 +1,8 @@
+from __future__ import annotations
+from typing import Callable
+import random
+from pathlib import Path
+
 from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 import torch
@@ -6,8 +11,12 @@ from torchvision import transforms
 import h5py
 import matplotlib.pyplot as plt
 
+from scrape_fa.util.logging_config import setup_logging
+
+LOGGER = setup_logging("paired-image-ds")
+
 class PairedImageDataset(Dataset):
-    def __init__(self, hdf5_path, feat_transform=None, label_transform=None):
+    def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None, is_pred: bool = False):
 
         # Default feature transform: ToTensor
         if feat_transform is None:
@@ -25,33 +34,97 @@ class PairedImageDataset(Dataset):
         self.hdf5_path = hdf5_path
         self.feat_transform = feat_transform
         self.label_transform = label_transform
-        self.h5 = h5py.File(self.hdf5_path, 'r')
+        self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
         self.greyscale_group = self.h5['feature']
         self.label_group = self.h5['label']
+        self.is_pred = self.h5.attrs.get('is_pred', is_pred)
+        self.indices: list | None = indices
         # Only keep pairs that exist in both groups
         self.keys = sorted(set(self.greyscale_group.keys()) & set(self.label_group.keys()))
 
     def __len__(self):
+        if self.indices is not None:
+            return len(self.indices)
         return len(self.keys)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx, remap_idx: bool = True):
+        if self.indices is not None and remap_idx:
+            old_idx = idx
+            idx = self.indices[idx]
         key = self.keys[idx]
         # Load greyscale and label arrays
-        grey = self.greyscale_group[key][()]
-        label = self.label_group[key][()]
+        grey = self.greyscale_group[key][()].squeeze().astype(np.float64)
+        label = self.label_group[key][()].astype(np.float64)
+
+
+        meta = {attr: self.greyscale_group[key].attrs[attr] for attr in self.greyscale_group[key].attrs}
+
+        if self.is_pred:
+            return {'feature': grey, 'label': label, 'meta': meta}
         # Convert to PIL Images for compatibility with transforms
-        grey_img = Image.fromarray(np.clip(grey, 0, 255).astype(np.uint8))
+        grey_img = Image.fromarray(grey.astype(np.uint8))
         label_img = Image.fromarray(label.astype(np.uint8))
         feat = self.feat_transform(grey_img)
         lab = self.label_transform(label_img)
-        # Optionally, return metadata as well
-        meta = {attr: self.greyscale_group[key].attrs[attr] for attr in self.greyscale_group[key].attrs}
         return {'feature': feat, 'label': lab, 'meta': meta}
+
+    def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False) -> list["PairedImageDataset"]:
+        # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
+
+        if save_loc is None:
+            cache_valid = False
+        else:
+            split_file = Path(save_loc) / "splits.csv"
+            cache_valid = split_file.exists() and not regenerate_splits
+
+
+        idcs_list = []
+        if cache_valid:
+            LOGGER.info("Found cached splits, using those.")
+            with split_file.open("r") as f:
+                data = f.readlines()
+
+            fracs = data[0].strip().split(",")
+            fracs = [float(field.strip()) for field in fracs]
+            if np.allclose(fracs, splits):
+                for row in data[1:]:
+                    idcs = row.strip().split(",")
+                    idcs_list.append([int(field.strip()) for field in idcs])
+            else:
+                LOGGER.warn("Cached splits don't match args, ignoring cache")
+
+
+        idcs = list(range(len(self)))
+        if shuffle:
+            random.shuffle(idcs)
+
+        start_idx = 0
+        datasets = []
+        for i, split in enumerate(splits):
+            end_idx = start_idx + int(len(self) * split)
+            subset_indices = idcs[start_idx:end_idx]
+            if not cache_valid: # This means we didnt cache them
+                idcs_list.append(subset_indices)
+            else:
+                subset_indices = idcs_list[i]
+            datasets.append(
+                PairedImageDataset(
+                    self.hdf5_path,
+                    feat_transform=self.feat_transform,
+                    label_transform=self.label_transform,
+                    indices=subset_indices
+                )
+            )
+
+            start_idx = end_idx
+
+        return datasets, idcs_list
+
 
     def close(self):
         self.h5.close()
 
-    def show(self, idx: int, overlay: bool = False) -> None:
+    def show(self, idx: int, overlay: bool = True) -> None:
         if overlay:
             self.show_overlay(idx)
         else:
@@ -82,7 +155,13 @@ class PairedImageDataset(Dataset):
         axes[1].set_title('Data')
         axes[1].axis('off')
 
-        plt.imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label / np.max(arr_label), interpolation='none')
+
+        if np.max(arr_label) == 0:
+            arr_label = np.zeros_like(arr_label)
+        else:
+            arr_label = (arr_label -  np.min(arr_label)) / (np.max(arr_label) - np.min(arr_label))
+
+        axes[1].imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label, interpolation='none')
         plt.tight_layout()
         plt.show()
 
@@ -127,19 +206,21 @@ class PairedImageDataset(Dataset):
         with h5py.File(output_path, 'w') as h5f:
             feat_group = h5f.create_group('feature')
             label_group = h5f.create_group('label')
+            h5f.attrs['is_pred'] = True
             for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
                 key = f"sample_{i}"
-                feat_group.create_dataset(key, data=sample['feature'].cpu().numpy())
+                feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
                 label_group.create_dataset(key, data=pred.cpu().numpy())
                 for attr, value in sample['meta'].items():
                     feat_group[key].attrs[attr] = value
-        return cls(output_path, label_transform=transforms.ToTensor(), feat_transform=base_ds.feat_transform)
+                    label_group[key].attrs[attr] = value
+
+        return cls(output_path, label_transform=lambda x: x, feat_transform=base_ds.feat_transform, indices=base_ds.indices, is_pred=True)
 
 
 if __name__ == "__main__":
-    ds = PairedImageDataset("processed_data.h5")
+    ds = PairedImageDataset("runs/20250821_102256/test_predictions.h5", is_pred=True)
 
-    print(f"Length: {len(ds)}")
     for i in range(10):
         j = np.random.randint(0, len(ds))
-        ds.show(j, overlay=True)
+        ds.show(j)
