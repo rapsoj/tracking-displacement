@@ -1,0 +1,31 @@
+geotiff_dir: tiff_files
+geojson: tents-2025-08-18_112914.geojson
+hdf5: processed_data.h5
+artifact_dir: runs
+loading:
+  files:
+    - al_mawasi_20250302_060140_ssc2_u0004_visual_clip.tif
+    - deir_el_balah_20250315_121122_ssc10_u0002_visual_clip_file_format.tif
+    - deir_el_balah_20250319_121507_ssc8_u0001_visual_clip_file_format.tif
+    - deir_el_balah_20250330_121424_ssc7_u0001_visual_clip.tif
+    - gaza_city_and_jabalia_20250319_121502_ssc8_u0001_visual_clip_file_format.tif
+    - khan_yunis_20250315_065509_ssc13_u0001_visual_file_format.tif
+    - khan_yunis_20250318_065316_ssc1_u0001_visual_clip_file_format.tif
+    - khan_yunis_20250327_120323_ssc6_u0001_visual.tif
+    - netzarim_corridor_gaza_city_beit_lahiya_20250331_121449_ssc10_u0001_visual_clip.tif
+    - nuseirat_20250325_055502_ssc4_u0002_visual_clip_file_format.tif
+    - rafah_kerem_shalom_crossing_20250329_115510_ssc9_u0002_visual.tif
+    - tel_al-sultan_al_mawasi_20250331_055243_ssc4_u0001_visual_clip.tif
+processing:
+  step: 0.0005
+  quality_thresholds:
+    start_threshold: 0.2
+    max_missing_end: 0.2
+    min_valid_fraction: 0.9
+training:
+  checkpoint: null
+  epochs: 10000
+  batch_size: 8
+  learning_rate: 0.0005
+  training_frac: 0.7
+  validation_frac: 0.15
