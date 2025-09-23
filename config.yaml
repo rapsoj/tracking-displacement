@@ -23,9 +23,13 @@ processing:
     max_missing_end: 0.2
     min_valid_fraction: 0.9
 training:
-  checkpoint: null
+  checkpoint: runs/20250821_134326_best_later/best_model.pth
   epochs: 10000
   batch_size: 8
   learning_rate: 0.0005
   training_frac: 0.7
   validation_frac: 0.15
+prediction:
+  input: processed_data.h5
+  output: predictions.h5
+  model: runs/20250821_134326_best_later/best_model.pth
