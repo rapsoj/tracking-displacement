@@ -10,10 +10,22 @@ import numpy as np
 from torchvision import transforms
 import h5py
 import matplotlib.pyplot as plt
+from scipy.ndimage import label
 
 from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging("paired-image-ds")
+
+
+def remove_small_components(arr, min_area):
+    # Label connected components
+    labeled, num_features = label(arr)
+    # Count area of each component (component 0 is background)
+    areas = np.bincount(labeled.ravel())
+    # Create mask for components above threshold
+    mask = np.isin(labeled, np.where(areas >= min_area)[0])
+    # Return filtered array (same dtype as input)
+    return arr * mask
 
 class PairedImageDataset(Dataset):
     def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None, is_pred: bool = False):
@@ -155,11 +167,8 @@ class PairedImageDataset(Dataset):
         axes[1].set_title('Data')
         axes[1].axis('off')
 
-
-        if np.max(arr_label) == 0:
-            arr_label = np.zeros_like(arr_label)
-        else:
-            arr_label = (arr_label -  np.min(arr_label)) / (np.max(arr_label) - np.min(arr_label))
+        arr_label = np.where(arr_label > 1, 1., 0.)
+        arr_label = remove_small_components(arr_label, 25)
 
         axes[1].imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label, interpolation='none')
         plt.tight_layout()
@@ -199,7 +208,7 @@ class PairedImageDataset(Dataset):
         plt.show()
 
     @classmethod
-    def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str):
+    def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str, post_processor: Callable = lambda x: x):
         """
         Create a new dataset from predictions, saving them to an HDF5 file.
         """
@@ -210,7 +219,7 @@ class PairedImageDataset(Dataset):
             for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
                 key = f"sample_{i}"
                 feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
-                label_group.create_dataset(key, data=pred.cpu().numpy())
+                label_group.create_dataset(key, data=post_processor(pred.cpu().numpy()))
                 for attr, value in sample['meta'].items():
                     feat_group[key].attrs[attr] = value
                     label_group[key].attrs[attr] = value
@@ -219,8 +228,10 @@ class PairedImageDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = PairedImageDataset("runs/20250821_102256/test_predictions.h5", is_pred=True)
+    ds = PairedImageDataset("predictions.h5")
 
-    for i in range(10):
-        j = np.random.randint(0, len(ds))
-        ds.show(j)
+    for i in range(len(ds)):
+        try:
+            ds.show(i)
+        except Exception as exc:
+            print("Failed to show index", i, ":", exc)
