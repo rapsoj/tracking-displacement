@@ -10,8 +10,7 @@ import os
 import rasterio
 import yaml
 from collections import defaultdict
-from datetime import datetime, date
-from PIL import Image
+from datetime import datetime, date, timedelta
 from rasterio.errors import RasterioIOError
 from rasterio.warp import transform
 from typing import Any
@@ -55,15 +54,16 @@ def process_group(
     origin_image: str,
     origin_date: str,
     src_crs: Any,
-    wgs84_crs: Any
-) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    # ToDo: make this caching less hacky
+    wgs84_crs: Any,
+    prewar_src: rasterio.io.DatasetReader | None = None
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any], np.ndarray | None]:
     global WIDTH, HEIGHT
-    # Transform WGS84 (lon, lat) to raster CRS
-    xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
-    x1, x2 = xs[0], xs[1]
-    y1, y2 = ys[0], ys[1]
     try:
+        # Transform WGS84 (lon, lat) to raster CRS
+        xs, ys = transform(wgs84_crs, src_crs, [lon - step, lon + 2 * step], [lat - step, lat + 2 * step])
+        x1, x2 = xs[0], xs[1]
+        y1, y2 = ys[0], ys[1]
+
         row1, col1 = src.index(x1, y1)
         row2, col2 = src.index(x2, y2)
         row_start, row_end = sorted([row1, row2])
@@ -80,11 +80,12 @@ def process_group(
         # Read RGB bands and convert to greyscale
         data = src.read([1, 2, 3], window=((row_start, row_end), (col_start, col_end)))
         if data.size == 0 or np.all(np.isnan(data)) or np.all(data == 0):
-            return None, None, None
+            return None, None, None, None
         r = data[0].astype(float)
         g = data[1].astype(float)
         b = data[2].astype(float)
         grey = 0.2989 * r + 0.5870 * g + 0.1140 * b
+
         # Create label image
         label = np.zeros_like(grey, dtype=np.uint8)
         for feat in feats:
@@ -97,6 +98,7 @@ def process_group(
                     cc = local_col + dc
                     if 0 <= rr < label.shape[0] and 0 <= cc < label.shape[1]:
                         label[rr, cc] = 255
+
         meta = {
             'origin_image': origin_image,
             'origin_date': origin_date,
@@ -105,10 +107,32 @@ def process_group(
             'lat_min': lat - step,
             'lat_max': lat + 2 * step
         }
-        return grey.astype(np.float32), label, meta
+
+        # Read corresponding prewar tile if available
+        prewar_tile = None
+        if prewar_src:
+            pre_xs, pre_ys = transform(wgs84_crs, prewar_src.crs, [lon - step, lon + 2 * step],
+                                       [lat - step, lat + 2 * step])
+            pre_row1, pre_col1 = prewar_src.index(pre_xs[0], pre_ys[0])
+            pre_row2, pre_col2 = prewar_src.index(pre_xs[1], pre_ys[1])
+
+            pre_row_start, pre_row_end = sorted([pre_row1, pre_row2])
+            pre_col_start, pre_col_end = sorted([pre_col1, pre_col2])
+
+            # Clip to raster bounds
+            pre_row_start = max(0, pre_row_start)
+            pre_row_end = min(prewar_src.height, pre_row_end)
+            pre_col_start = max(0, pre_col_start)
+            pre_col_end = min(prewar_src.width, pre_col_end)
+
+            pre_data = prewar_src.read(1, window=((pre_row_start, pre_row_end), (pre_col_start, pre_col_end)))
+            prewar_tile = pre_data.astype(np.float32)
+
+        return grey.astype(np.float32), label, meta, prewar_tile
+
     except Exception as e:
         LOGGER.exception("Failed to process group")
-        return None, None, None
+        return None, None, None, None
 
 
 def parse_date_safe(date_str: str | None) -> date | None:
@@ -125,7 +149,11 @@ def filter_tents_by_target_date(
     features: list[dict[str, Any]],
     date_target: date
 ) -> list[dict[str, Any]]:
-    """Keep tents where start <= target <= end, or end is None."""
+    """
+    Keep tents where:
+      - start <= target <= end, OR
+      - end is None but target is within 30 days of start.
+    """
     filtered = []
     for feat in features:
         props = feat.get('properties', {})
@@ -133,7 +161,9 @@ def filter_tents_by_target_date(
         tent_end_dt = parse_date_safe(props.get('date_end'))
 
         if tent_start_dt and tent_start_dt <= date_target:
-            if tent_end_dt is None or date_target <= tent_end_dt:
+            if tent_end_dt and date_target <= tent_end_dt:
+                filtered.append(feat)
+            elif tent_end_dt is None and date_target - tent_start_dt <= timedelta(days=30):
                 filtered.append(feat)
     return filtered
 
@@ -229,10 +259,20 @@ class HDF5Writer:
         self.label_group = self.file.create_group('label')
         self.tile_idx = 0
 
-    def add_entry(self, grey: np.ndarray, label: np.ndarray, meta: dict[str, Any]):
+    def add_entry(self, grey: np.ndarray, label: np.ndarray, meta: dict[str, Any], prewar: np.ndarray | None = None):
         tile_name = f"tile_{self.tile_idx:05d}"
         gset = self.greyscale_group.create_dataset(tile_name, data=grey, compression='gzip')
         lset = self.label_group.create_dataset(tile_name, data=label, compression='gzip')
+        if prewar is not None:
+            pset = self.greyscale_group.create_dataset(tile_name + "_prewar", data=prewar, compression='gzip')
+            for attr, val in [('origin_image', meta['origin_image']),
+                              ('origin_date', meta['origin_date']),
+                              ('lon_min', round(meta['lon_min'], 5)),
+                              ('lon_max', round(meta['lon_max'], 5)),
+                              ('lat_min', round(meta['lat_min'], 5)),
+                              ('lat_max', round(meta['lat_max'], 5))]:
+                pset.attrs[attr] = val
+
         for ds in (gset, lset):
             ds.attrs['origin_image'] = meta['origin_image']
             ds.attrs['origin_date'] = meta['origin_date']
@@ -253,12 +293,16 @@ def scan_grouped_coordinates(
     quality_thresholds: dict[str, Any],
     step: float,
     date_target: str | None,
+    prewar_path: str | None = None  # <--- added
 ) -> None:
+
     try:
         src = rasterio.open(geotiff_path)
     except RasterioIOError:
         LOGGER.exception(f"Error opening GeoTIFF")
         return
+
+    prewar_src = rasterio.open(prewar_path) if prewar_path else None
 
     with open(geojson_path, 'r') as f:
         geojson = json.load(f)
@@ -286,16 +330,18 @@ def scan_grouped_coordinates(
 
     for (lon, lat), feats in grouped.items():
         if not is_high_quality_tile(feats, date_target, src, lon, lat, step, **quality_thresholds):
-            continue  # skip low-quality tile
+            continue
+        grey, label, meta, prewar_tile = process_group(src, feats, lon, lat, step, os.path.basename(geotiff_path), date_target or '', src_crs, wgs84_crs, prewar_src)
         high_quality_found = True
-        grey, label, meta = process_group(src, feats, lon, lat, step, os.path.basename(geotiff_path), date_target or '', src_crs, wgs84_crs)
         if grey is not None and label is not None and meta is not None:
-            hdf5_writer.add_entry(grey, label, meta)
+            hdf5_writer.add_entry(grey, label, meta, prewar_tile)
 
     if not high_quality_found:
         LOGGER.warn(f"No valid high-quality tiles found in {os.path.basename(geotiff_path)}")
 
     src.close()
+    if prewar_src:
+        prewar_src.close()
 
 def scan_all_coordinates(
     geotiff_path: str,
@@ -337,7 +383,7 @@ def cli(config):
         hdf5: path/to/output.h5
         step: 0.001
         start_threshold: 0.2
-        max_missing_end: 0.2
+        max_missing_end: 0.6
         min_valid_fraction: 0.9
     """
     with open(config, 'r') as f:
@@ -350,11 +396,13 @@ def cli(config):
         params['geotiff_dir'],
         params.get("geojson"),
         params['hdf5'],
-        **params['processing']
+        **params['processing'],
+        prewar_path=params.get('prewar_gaza')
     )
 
 
-def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any]) -> None:
+
+def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None) -> None:
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
         LOGGER.error(f"No .tif files found in {geotiff_dir}")
@@ -368,14 +416,15 @@ def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: f
 
         LOGGER.info(f"Processing {tif_path} with date {date_target}...")
         if geojson is not None:
-            scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target)
+            scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path)
         else:
             scan_all_coordinates(tif_path, hdf5_writer, date_target, step)
     hdf5_writer.write()
     LOGGER.info(f"Saved dataset to {hdf5}")
 
+
 if __name__ == "__main__":
     cli()
 
 # EXAMPLE CLI USAGE:
-# poetry run coordinate-scanner config.yaml
+# poetry run coordinate_scanner config.yaml
