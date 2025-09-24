@@ -343,6 +343,33 @@ def scan_grouped_coordinates(
     if prewar_src:
         prewar_src.close()
 
+def scan_all_coordinates(
+    geotiff_path: str,
+    hdf5_writer: 'HDF5Writer',
+    date_target: str | None,
+    step: float = 0.001,
+):
+    try:
+        src = rasterio.open(geotiff_path)
+    except RasterioIOError:
+        LOGGER.exception(f"Error opening GeoTIFF")
+        return
+
+
+    bounds = src.bounds
+    lon_bounds, lat_bounds = transform(src.crs, 'EPSG:4326', [bounds.left, bounds.right], [bounds.bottom, bounds.top])
+    LOGGER.info(f"GeoTIFF bounds: min_lon={lon_bounds[0]}, min_lat={lat_bounds[0]}, max_lon={lon_bounds[1]}, max_lat={lat_bounds[1]}")
+
+    src_crs = src.crs
+    wgs84_crs = 'EPSG:4326'
+
+    for lon in np.arange(lon_bounds[0], lon_bounds[1], step):
+        for lat in np.arange(lat_bounds[0], lat_bounds[1], step):
+            grey, label, meta = process_group(src, [], lon, lat, step, os.path.basename(geotiff_path), date_target or '', src_crs, wgs84_crs)
+            if grey is not None and label is not None and meta is not None:
+                hdf5_writer.add_entry(grey, label, meta)
+
+    src.close()
 
 @click.command()
 @click.argument('config', type=click.Path(exists=True, dir_okay=False))
@@ -361,20 +388,21 @@ def cli(config):
     """
     with open(config, 'r') as f:
         params = yaml.safe_load(f)
-    required = ['geotiff_dir', 'geojson', 'hdf5', 'processing']
+    required = ['geotiff_dir', 'hdf5', 'processing']
     for k in required:
         if k not in params:
             raise click.ClickException(f"Missing required config key: {k}")
     coordinate_scanner(
         params['geotiff_dir'],
-        params['geojson'],
+        params.get("geojson"),
         params['hdf5'],
         **params['processing'],
         prewar_path=params.get('prewar_gaza')
     )
 
 
-def coordinate_scanner(geotiff_dir: str, geojson: str, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None) -> None:
+
+def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None) -> None:
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
         LOGGER.error(f"No .tif files found in {geotiff_dir}")
@@ -387,7 +415,10 @@ def coordinate_scanner(geotiff_dir: str, geojson: str, hdf5: str, step: float, q
             continue
 
         LOGGER.info(f"Processing {tif_path} with date {date_target}...")
-        scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path)
+        if geojson is not None:
+            scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path)
+        else:
+            scan_all_coordinates(tif_path, hdf5_writer, date_target, step)
     hdf5_writer.write()
     LOGGER.info(f"Saved dataset to {hdf5}")
 

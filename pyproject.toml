@@ -27,6 +27,7 @@ PyYAML = "^6.0.1"
 tif-loader = "scrape_fa.tif_loader:tif_loader"
 coordinate-scanner = "scrape_fa.coordinate_scanner:cli"
 train-cnn = "scrape_fa.train_cnn:cli"
+predict = "scrape_fa.predict:cli"
 
 [build-system]
 requires = ["poetry-core"]
