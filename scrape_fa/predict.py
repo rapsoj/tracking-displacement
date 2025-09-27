@@ -12,7 +12,7 @@ def prediction(dataset, model, target_dir, device):
     with torch.no_grad():
         output_combined = []
         for entry in dataset:
-            feats = entry["feature"]
+            feats = torch.stack((entry["feature"], entry["prewar"]))
             feats = feats.to(device)
             outputs = model(feats)
             output_combined.append(outputs.cpu().squeeze())

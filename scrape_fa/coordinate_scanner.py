@@ -125,6 +125,12 @@ def process_group(
             pre_col_start = max(0, pre_col_start)
             pre_col_end = min(prewar_src.width, pre_col_end)
 
+            if (pre_col_end - pre_col_start) != WIDTH:
+                pre_col_end = pre_col_start + WIDTH
+            if (pre_row_end - pre_row_start) != HEIGHT:
+                pre_row_end = pre_row_start + HEIGHT
+
+
             pre_data = prewar_src.read(1, window=((pre_row_start, pre_row_end), (pre_col_start, pre_col_end)))
             prewar_tile = pre_data.astype(np.float32)
 
@@ -257,23 +263,19 @@ class HDF5Writer:
         self.file = h5py.File(self.hdf5_path, 'w')
         self.greyscale_group = self.file.create_group('feature')
         self.label_group = self.file.create_group('label')
+        self.prewar_group = self.file.create_group("prewar")
         self.tile_idx = 0
 
     def add_entry(self, grey: np.ndarray, label: np.ndarray, meta: dict[str, Any], prewar: np.ndarray | None = None):
         tile_name = f"tile_{self.tile_idx:05d}"
         gset = self.greyscale_group.create_dataset(tile_name, data=grey, compression='gzip')
         lset = self.label_group.create_dataset(tile_name, data=label, compression='gzip')
+        ds_list = [gset, lset]
         if prewar is not None:
-            pset = self.greyscale_group.create_dataset(tile_name + "_prewar", data=prewar, compression='gzip')
-            for attr, val in [('origin_image', meta['origin_image']),
-                              ('origin_date', meta['origin_date']),
-                              ('lon_min', round(meta['lon_min'], 5)),
-                              ('lon_max', round(meta['lon_max'], 5)),
-                              ('lat_min', round(meta['lat_min'], 5)),
-                              ('lat_max', round(meta['lat_max'], 5))]:
-                pset.attrs[attr] = val
+            pset = self.prewar_group.create_dataset(tile_name, data=prewar, compression='gzip')
+            ds_list.append(pset)
 
-        for ds in (gset, lset):
+        for ds in ds_list:
             ds.attrs['origin_image'] = meta['origin_image']
             ds.attrs['origin_date'] = meta['origin_date']
             ds.attrs['lon_min'] = round(meta['lon_min'], 5)
@@ -348,6 +350,7 @@ def scan_all_coordinates(
     hdf5_writer: 'HDF5Writer',
     date_target: str | None,
     step: float = 0.001,
+    prewar_path: str | None = None
 ):
     try:
         src = rasterio.open(geotiff_path)
@@ -363,11 +366,14 @@ def scan_all_coordinates(
     src_crs = src.crs
     wgs84_crs = 'EPSG:4326'
 
+    prewar_src = rasterio.open(prewar_path) if prewar_path else None
+
+
     for lon in np.arange(lon_bounds[0], lon_bounds[1], step):
         for lat in np.arange(lat_bounds[0], lat_bounds[1], step):
-            grey, label, meta = process_group(src, [], lon, lat, step, os.path.basename(geotiff_path), date_target or '', src_crs, wgs84_crs)
+            grey, label, meta, prewar_img = process_group(src, [], lon, lat, step, os.path.basename(geotiff_path), date_target or '', src_crs, wgs84_crs, prewar_src=prewar_src)
             if grey is not None and label is not None and meta is not None:
-                hdf5_writer.add_entry(grey, label, meta)
+                hdf5_writer.add_entry(grey, label, meta, prewar_img)
 
     src.close()
 
