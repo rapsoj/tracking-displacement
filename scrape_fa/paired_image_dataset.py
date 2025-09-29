@@ -119,7 +119,7 @@ class PairedImageDataset(Dataset):
         for i, split in enumerate(splits):
             end_idx = start_idx + int(len(self) * split)
             subset_indices = idcs[start_idx:end_idx]
-            if not cache_valid: # This means we didnt cache them
+            if not cache_valid: # This means we didn't cache them
                 idcs_list.append(subset_indices)
             else:
                 subset_indices = idcs_list[i]
@@ -222,7 +222,7 @@ class PairedImageDataset(Dataset):
             prewar_group = h5f.create_group("prewar")
             h5f.attrs['is_pred'] = True
             for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
-                key = f"sample_{i}"
+                key = f"tile_{i:05d}"
                 feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
                 prewar_group.create_dataset(key, data=sample["prewar"].cpu().numpy().squeeze())
                 label_group.create_dataset(key, data=post_processor(pred.cpu().numpy()))
@@ -234,9 +234,11 @@ class PairedImageDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = PairedImageDataset("predictions.h5")
+    ds = PairedImageDataset("no_labels.h5")
 
-    for i in range(len(ds)):
+    print(ds.keys)
+
+    for i in range(10):
         try:
             ds.show(i)
         except Exception as exc:

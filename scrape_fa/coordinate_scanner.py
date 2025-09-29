@@ -351,7 +351,7 @@ def scan_grouped_coordinates(
                     # Close the original src and reopen from memoryfile
                     src.close()
                     src = memfile.open()
-                    # Keep a reference to memfile so it doesn't get garbage collected while `src` is used
+                    # Keep a reference to memfile, so it doesn't get garbage collected while `src` is used
                     src._memfile = memfile
 
                     LOGGER.info(f"Cropped {os.path.basename(geotiff_path)} to provided boundaries; new bounds: {src.bounds}")
@@ -489,7 +489,7 @@ def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: f
         if geojson is not None:
             scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path, boundaries_path)
         else:
-            scan_all_coordinates(tif_path, hdf5_writer, date_target, step)
+            scan_all_coordinates(tif_path, hdf5_writer, date_target, step, prewar_path)
 
     hdf5_writer.write()
     LOGGER.info(f"Saved dataset to {hdf5}")
