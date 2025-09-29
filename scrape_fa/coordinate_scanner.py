@@ -9,10 +9,14 @@ import numpy as np
 import os
 import rasterio
 import yaml
+import fiona
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 from rasterio.errors import RasterioIOError
 from rasterio.warp import transform
+from rasterio import mask
+from rasterio.io import MemoryFile
+from rasterio.warp import transform_geom
 from typing import Any
 
 from scrape_fa.util.logging_config import setup_logging
@@ -295,7 +299,8 @@ def scan_grouped_coordinates(
     quality_thresholds: dict[str, Any],
     step: float,
     date_target: str | None,
-    prewar_path: str | None = None  # <--- added
+    prewar_path: str | None = None,
+    boundaries_path: str | None = None
 ) -> None:
 
     try:
@@ -303,6 +308,62 @@ def scan_grouped_coordinates(
     except RasterioIOError:
         LOGGER.exception(f"Error opening GeoTIFF")
         return
+
+    # --- Crop the raster to the provided municipal boundaries (if any) ---
+    if boundaries_path:
+        try:
+            with fiona.open(boundaries_path, 'r') as shp:
+                shp_crs = shp.crs
+                shp_geoms = [feature['geometry'] for feature in shp]
+
+            # transform geometries into the raster CRS if needed
+            transformed_geoms = []
+            for g in shp_geoms:
+                try:
+                    # transform_geom will accept dict CRS or rasterio CRS
+                    tg = transform_geom(shp_crs, src.crs, g)
+                    transformed_geoms.append(tg)
+                except Exception:
+                    # If transform fails, try assuming shapefile is already in EPSG:4326
+                    try:
+                        tg = transform_geom('EPSG:4326', src.crs, g)
+                        transformed_geoms.append(tg)
+                    except Exception:
+                        LOGGER.exception('Failed to transform boundary geometry; skipping geometry')
+
+            if not transformed_geoms:
+                LOGGER.warning('No valid transformed geometries found in boundaries; skipping cropping.')
+            else:
+                # Use rasterio.mask to crop to the union of geometries overlapping this tif
+                try:
+                    out_image, out_transform = mask.mask(src, transformed_geoms, crop=True)
+                    out_meta = src.meta.copy()
+                    out_meta.update({
+                        "height": out_image.shape[1],
+                        "width": out_image.shape[2],
+                        "transform": out_transform
+                    })
+
+                    # Create an in-memory dataset to replace `src` for downstream processing
+                    memfile = MemoryFile()
+                    with memfile.open(**out_meta) as dataset:
+                        dataset.write(out_image)
+                    # Close the original src and reopen from memoryfile
+                    src.close()
+                    src = memfile.open()
+                    # Keep a reference to memfile so it doesn't get garbage collected while `src` is used
+                    src._memfile = memfile
+
+                    LOGGER.info(f"Cropped {os.path.basename(geotiff_path)} to provided boundaries; new bounds: {src.bounds}")
+                except ValueError:
+                    # No overlap between shapes and raster
+                    LOGGER.info(f"No overlap between {os.path.basename(geotiff_path)} and boundaries; skipping file.")
+                    src.close()
+                    return
+                except Exception:
+                    LOGGER.exception('Unexpected error while cropping raster; proceeding with original raster')
+        except Exception:
+            LOGGER.exception('Failed to read boundaries shapefile; proceeding without cropping')
 
     prewar_src = rasterio.open(prewar_path) if prewar_path else None
 
@@ -339,7 +400,7 @@ def scan_grouped_coordinates(
             hdf5_writer.add_entry(grey, label, meta, prewar_tile)
 
     if not high_quality_found:
-        LOGGER.warn(f"No valid high-quality tiles found in {os.path.basename(geotiff_path)}")
+        LOGGER.warning(f"No valid high-quality tiles found in {os.path.basename(geotiff_path)}")
 
     src.close()
     if prewar_src:
@@ -382,15 +443,18 @@ def scan_all_coordinates(
 def cli(config):
     """
     Run coordinate_scanner using a YAML config file.
-    The YAML file must define: geotiff_dir, geojson, hdf5, step, start_threshold, max_missing_end, min_valid_fraction.
+    The YAML file must define: geotiff_dir, geojson, hdf5, processing.
     Example YAML:
         geotiff_dir: path/to/geotiffs
         geojson: path/to/tents.geojson
         hdf5: path/to/output.h5
-        step: 0.001
-        start_threshold: 0.2
-        max_missing_end: 0.6
-        min_valid_fraction: 0.9
+        processing:
+          step: 0.001
+          quality_thresholds:
+            start_threshold: 0.2
+            max_missing_end: 0.6
+            min_valid_fraction: 0.9
+        boundaries: path/to/boundaries.shp
     """
     with open(config, 'r') as f:
         params = yaml.safe_load(f)
@@ -398,17 +462,17 @@ def cli(config):
     for k in required:
         if k not in params:
             raise click.ClickException(f"Missing required config key: {k}")
+
     coordinate_scanner(
         params['geotiff_dir'],
         params.get("geojson"),
         params['hdf5'],
         **params['processing'],
-        prewar_path=params.get('prewar_gaza')
+        prewar_path=params.get('prewar_gaza'),
+        boundaries_path=params.get('boundaries')
     )
 
-
-
-def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None) -> None:
+def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None, boundaries_path: str | None = None) -> None:
     tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
     if not tif_files:
         LOGGER.error(f"No .tif files found in {geotiff_dir}")
@@ -417,14 +481,16 @@ def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: f
     for tif_path in tif_files:
         date_target = extract_date_from_filename(tif_path)
         if not date_target:
-            LOGGER.warn(f"Skipping {tif_path} (no date found in filename).")
+            LOGGER.warning(f"Skipping {tif_path} (no date found in filename).")
             continue
 
         LOGGER.info(f"Processing {tif_path} with date {date_target}...")
+
         if geojson is not None:
-            scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path)
+            scan_grouped_coordinates(tif_path, geojson, hdf5_writer, quality_thresholds, step, date_target, prewar_path, boundaries_path)
         else:
             scan_all_coordinates(tif_path, hdf5_writer, date_target, step)
+
     hdf5_writer.write()
     LOGGER.info(f"Saved dataset to {hdf5}")
 
