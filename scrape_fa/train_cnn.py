@@ -12,6 +12,7 @@ import datetime
 from scrape_fa.paired_image_dataset import PairedImageDataset
 from scrape_fa.simple_cnn import SimpleCNN
 from scrape_fa.util.logging_config import setup_logging
+from scrape_fa.predict import prediction
 
 LOGGER = setup_logging("train-cnn")
 
@@ -56,12 +57,12 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     if checkpoint:
         checkpoint = Path(checkpoint)
-        model = SimpleCNN.from_pth(checkpoint, model_args={"n_channels": 1, "n_classes": 1}).to(device)
+        model = SimpleCNN.from_pth(checkpoint, model_args={"n_channels": 2, "n_classes": 1}).to(device)
         hdf5_path_obj = Path(hdf5_path)
 
         save_loc = checkpoint.parent
     else:
-        model = SimpleCNN(1, 1).to(device)
+        model = SimpleCNN(2, 1).to(device)
         save_loc = None
 
     # Load and shuffle dataset
@@ -95,7 +96,8 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         model.train()
         total_loss = 0
         for entry in train_loader:
-            feats, labels = entry["feature"].to(device), entry["label"].to(device)
+            feats = torch.cat((entry["feature"], entry["prewar"]), axis=1).to(device)
+            labels = entry["label"].to(device)
 
             optimizer.zero_grad()
             outputs = model(feats)
@@ -108,7 +110,8 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         val_loss = 0
         with torch.no_grad():
             for idx, entry in enumerate(val_loader):
-                feats, labels = entry["feature"].to(device), entry["label"].to(device)
+                feats = torch.cat((entry["feature"], entry["prewar"]), axis=1).to(device)
+                labels = entry["label"].to(device)
                 outputs = model(feats)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
@@ -123,19 +126,8 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     # Create timestamped run directory
     # Save trained model
     # Run through test set and save overlays
-    dataset_folder = run_dir
     model.eval()
-    output_combined = None
-    with torch.no_grad():
-        output_combined = []
-        for entry in test_set:
-            feats = entry["feature"]
-            feats = feats.to(device)
-            outputs = model(feats)
-            output_combined.append(outputs.cpu().squeeze())
-
-        PairedImageDataset.from_predictions(test_set, output_combined, os.path.join(run_dir, 'test_predictions.h5'))
-
+    prediction(test_set, model, os.path.join(run_dir, "test_predictions.h5"), device)
     LOGGER.info("Test overlays and comparison figures saved.")
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 geotiff_dir: tiff_files
 boundaries: gaza_boundaries/GazaStrip_MunicipalBoundaries.shp
 prewar_gaza: tiff_files/prewar_gaza.tif
-geojson: tents-2025-08-18_112914.geojson
+geojson: tents-2025-09-19_150435.geojson
 hdf5: processed_data.h5
 artifact_dir: runs
 loading:
@@ -25,7 +25,7 @@ processing:
     max_missing_end: 0.6
     min_valid_fraction: 0.9
 training:
-  checkpoint: runs/20250821_134326_best_later/best_model.pth
+  checkpoint: null # runs/20250821_134326_best_later/best_model.pth
   epochs: 10000
   batch_size: 8
   learning_rate: 0.0005
@@ -34,4 +34,4 @@ training:
 prediction:
   input: processed_data.h5
   output: predictions.h5
-  model: runs/20250821_134326_best_later/best_model.pth
+  model: null # runs/20250821_134326_best_later/best_model.pth

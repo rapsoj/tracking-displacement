@@ -48,6 +48,7 @@ class PairedImageDataset(Dataset):
         self.label_transform = label_transform
         self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
         self.greyscale_group = self.h5['feature']
+        self.prewar_group = self.h5['prewar']
         self.label_group = self.h5['label']
         self.is_pred = self.h5.attrs.get('is_pred', is_pred)
         self.indices: list | None = indices
@@ -67,18 +68,21 @@ class PairedImageDataset(Dataset):
         # Load greyscale and label arrays
         grey = self.greyscale_group[key][()].squeeze().astype(np.float64)
         label = self.label_group[key][()].astype(np.float64)
+        prewar = self.prewar_group[key][()].squeeze().astype(np.float64)
 
 
         meta = {attr: self.greyscale_group[key].attrs[attr] for attr in self.greyscale_group[key].attrs}
 
         if self.is_pred:
-            return {'feature': grey, 'label': label, 'meta': meta}
+            return {'feature': grey, 'label': label, 'meta': meta, "prewar": prewar}
         # Convert to PIL Images for compatibility with transforms
         grey_img = Image.fromarray(grey.astype(np.uint8))
         label_img = Image.fromarray(label.astype(np.uint8))
+        prewar_img = Image.fromarray(prewar.astype(np.uint8))
         feat = self.feat_transform(grey_img)
         lab = self.label_transform(label_img)
-        return {'feature': feat, 'label': lab, 'meta': meta}
+        prewar = self.feat_transform(prewar_img)
+        return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
 
     def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False) -> list["PairedImageDataset"]:
         # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
@@ -215,10 +219,12 @@ class PairedImageDataset(Dataset):
         with h5py.File(output_path, 'w') as h5f:
             feat_group = h5f.create_group('feature')
             label_group = h5f.create_group('label')
+            prewar_group = h5f.create_group("prewar")
             h5f.attrs['is_pred'] = True
             for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
                 key = f"sample_{i}"
                 feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
+                prewar_group.create_dataset(key, data=sample["prewar"].cpu().numpy().squeeze())
                 label_group.create_dataset(key, data=post_processor(pred.cpu().numpy()))
                 for attr, value in sample['meta'].items():
                     feat_group[key].attrs[attr] = value
