@@ -18,13 +18,13 @@ processing:
 prediction:
   # input: no_labels.h5
   input: no_labels.h5
-  output: predictions.h5
-  model: runs/20250927_211130/best_model.pth
+  output: predictions.json
+  model: runs/20250927_211130_with_prewar/best_model.pth
   # Optional sampling configuration
   sample:
     enable: true        # set to false to run on all tiles
     size: 100           # number of random tiles to predict
     seed: 42            # optional random seed for reproducibility
   processing:
-    threshold: 0.5
+    threshold: 1.5
     min_area: 10

@@ -39,14 +39,15 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     """
     threshold = processing_cfg.get('threshold', 0.5)
     min_area = processing_cfg.get('min_area', 20)
-    label_value = processing_cfg.get('label', 1)
+
 
     if sample_cfg and sample_cfg.get('enable', False):
         total = len(dataset)
         size = min(sample_cfg.get('size', total), total)
         seed = sample_cfg.get('seed', None)
         frac = float(size) / float(total)
-        (subset, ), (idcs, ) = dataset.create_subset([frac, 1-frac], seed=seed)
+        subsets, _ = dataset.create_subsets([frac, 1-frac], seed=seed)
+        subset = subsets[0]
         LOGGER.info(f"🔹 Using random sample of {size}/{total} tiles for prediction.")
     else:
         subset = dataset
@@ -61,12 +62,11 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                 feats = feats.to(device)
                 outputs = model(feats)
                 # Apply sigmoid
-                probs = torch.sigmoid(outputs)
-                probs_np = probs.cpu().squeeze().numpy()
+                probs_np = outputs.cpu().squeeze().numpy()
                 # Threshold
-                mask = (probs_np > threshold).astype(np.uint8)
+                mask = (probs_np > threshold)
                 # Label regions
-                labeled, num_features = label(mask == label_value)
+                labeled, num_features = label(mask)
                 # Filter by min_area and extract centroids
                 coords = []
                 shape = mask.shape
@@ -85,6 +85,7 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                     "bounds": bounds,
                     'coordinates': coords
                 })
+                LOGGER.info(f"Found {len(coords)} tents.")
             except Exception as exc:
                 LOGGER.warning(f"Prediction error: {exc}")
     # Wait for further instructions; do not save or process further
@@ -127,10 +128,7 @@ def save_geojson(results, out_path):
                         "coordinates": [polygon]
                     },
                     "properties": {
-                        "name": "tents",
-                        "date_start": bounds.get('origin_date'),
-                        "date_end": bounds.get('origin_date'),
-                        "source": bounds.get("origin_image")
+                        "name": "region_processed"
                     }
                 })
             except Exception as exc:
@@ -143,8 +141,10 @@ def save_geojson(results, out_path):
                     "coordinates": [lon, lat]
                 },
                 "properties": {
-                    "tile_index": tile_idx,
-                    "centroid_index": pt_idx
+                    "date_start": bounds.get('origin_date'),
+                    "name": "tents",
+                    "date_end": bounds.get('origin_date'),
+                    "source": bounds.get("origin_image")
                 }
             })
     geojson = {
@@ -178,6 +178,8 @@ def cli(config) -> None:
     processing_cfg = pred_cfg.get('processing', {})
     out_path = pred_cfg.get('output', 'predictions.geojson')
     results = predict_json(ds, model, device, processing_cfg, sample_cfg)
+    tent_count = sum(len(res["coordinates"]) for res in results)
+    LOGGER.info(f"Total number of tents: {tent_count}")
     save_geojson(results, out_path)
 
 if __name__ == '__main__':
