@@ -2,27 +2,40 @@
 name = "scrape-fa"
 version = "0.1.0"
 description = ""
-authors = [{name = "Karim Alaa El-Din", email = "karim@aedin.dev"}]
+authors = [{ name = "Karim Alaa El-Din", email = "karim@aedin.dev" }]
 readme = "README.md"
-packages = [{include = "scrape_fa"}]
+packages = [{ include = "scrape_fa" }]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+
+# --- Core libraries ---
 selenium = "^4.33.0"
 opencv-python = "^4.8.0"
 pillow = "^10.0.0"
 numpy = "^1.24.0"
 python-dotenv = "^1.1.1"
-rasterio = "^1.4.3"
 matplotlib = "^3.10.3"
 click = "^8.2.1"
+tqdm = "^4.66.1"
 torch = "^2.7.1"
 torchvision = "^0.22.1"
 google-api-python-client = "^2.176.0"
 scipy = "1.15.3"
 h5py = "^3.11.0"
 PyYAML = "^6.0.1"
-fiona = "^1.10.1"
+
+# --- GIS libraries (with platform awareness) ---
+# These can be difficult to compile on M1 macOS. The markers below ensure pip uses prebuilt wheels.
+
+rasterio = [
+    { version = "^1.4.3", markers = "platform_system != 'Darwin'" },
+    { version = "^1.4.3", markers = "platform_system == 'Darwin'", extras = ["gdal"] }
+]
+fiona = [
+    { version = "^1.10.1", markers = "platform_system != 'Darwin'" },
+    { version = "^1.10.1", markers = "platform_system == 'Darwin'", extras = ["gdal"] }
+]
 
 [project.scripts]
 tif-loader = "scrape_fa.tif_loader:tif_loader"

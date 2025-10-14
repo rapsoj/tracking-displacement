@@ -469,11 +469,33 @@ def cli(config):
         params['hdf5'],
         **params['processing'],
         prewar_path=params.get('prewar_gaza'),
-        boundaries_path=params.get('boundaries')
+        boundaries_path=params.get('boundaries'),
+        config=config
     )
 
-def coordinate_scanner(geotiff_dir: str, geojson: str | None, hdf5: str, step: float, quality_thresholds: dict[str, Any], prewar_path: str | None = None, boundaries_path: str | None = None) -> None:
-    tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
+def coordinate_scanner(
+    geotiff_dir: str,
+    geojson: str | None,
+    hdf5: str,
+    step: float,
+    quality_thresholds: dict[str, Any],
+    prewar_path: str | None = None,
+    boundaries_path: str | None = None,
+    config: str | None = None
+) -> None:
+    if config:
+        with open(config, 'r') as f:
+            cfg = yaml.safe_load(f)
+        search_files = cfg.get('loading', {}).get('files', [])
+        # Make sure we only pick files that exist in the geotiff_dir
+        tif_files = [os.path.join(geotiff_dir, f) for f in search_files if os.path.exists(os.path.join(geotiff_dir, f))]
+    else:
+        # Fallback to original behavior
+        tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
+
+    print("Using TIFF files:")
+    for f in tif_files:
+        print(f)
     if not tif_files:
         LOGGER.error(f"No .tif files found in {geotiff_dir}")
         return

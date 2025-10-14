@@ -1,0 +1,27 @@
+#geotiff_dir: predict_tiffs
+geotiff_dir: tiff_files
+boundaries: gaza_boundaries/GazaStrip_MunicipalBoundaries.shp
+# geojson: tents-2025-09-19_150435.geojson
+prewar_gaza: tiff_files/prewar_gaza.tif
+# hdf5: no_labels.h5
+hdf5: no_labels.h5
+loading:
+  files:
+#    - khan_yunis_al_mawasi_20250214_121114_ssc6_u0002_visual_clip.tif
+     - khan_yunis_20250327_120323_ssc6_u0001_visual.tif # training data
+processing:
+  step: 0.0005
+  quality_thresholds:
+    start_threshold: 0.2
+    max_missing_end: 0.2
+    min_valid_fraction: 0.9
+prediction:
+  # input: no_labels.h5
+  input: no_labels.h5
+  output: predictions.h5
+  model: runs/20250927_211130/best_model.pth
+  # Optional sampling configuration
+  sample:
+    enable: true        # set to false to run on all tiles
+    size: 100           # number of random tiles to predict
+    seed: 42            # optional random seed for reproducibility
