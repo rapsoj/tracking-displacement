@@ -25,3 +25,6 @@ prediction:
     enable: true        # set to false to run on all tiles
     size: 100           # number of random tiles to predict
     seed: 42            # optional random seed for reproducibility
+  processing:
+    threshold: 0.5
+    min_area: 10
