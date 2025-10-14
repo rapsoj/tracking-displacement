@@ -127,8 +127,10 @@ def save_geojson(results, out_path):
                         "coordinates": [polygon]
                     },
                     "properties": {
-                        "tile_index": tile_idx,
-                        "bounds": bounds
+                        "name": "tents",
+                        "date_start": bounds.get('origin_date'),
+                        "date_end": bounds.get('origin_date'),
+                        "source": bounds.get("origin_image")
                     }
                 })
             except Exception as exc:
