@@ -275,6 +275,13 @@ def process_group(
         prewar_tile = None
         if prewar_src:
             try:
+                # ensure canonical defaults if _world_window hasn't set module globals
+                global WIDTH, HEIGHT
+                if WIDTH is None:
+                    WIDTH = 191
+                if HEIGHT is None:
+                    HEIGHT = 224
+
                 # map the same WGS84 bbox into prewar CRS and index there
                 pxs, pys = transform('EPSG:4326', prewar_src.crs, [lon_min, lon_max], [lat_min, lat_max])
                 rpre_a, cpre_a = prewar_src.index(pxs[0], pys[0])
@@ -285,8 +292,35 @@ def process_group(
                 rpre0 = max(0, rpre0); rpre1 = min(prewar_src.height, rpre1)
                 cpre0 = max(0, cpre0); cpre1 = min(prewar_src.width, cpre1)
                 if rpre0 < rpre1 and cpre0 < cpre1:
-                    pre_data = prewar_src.read(1, window=((rpre0, rpre1), (cpre0, cpre1)))
-                    prewar_tile = pre_data.astype(np.float32)
+                    # enforce the same fixed canonical tile size for prewar tiles
+                    w = cpre1 - cpre0
+                    h = rpre1 - rpre0
+                    tile_w = min(WIDTH, prewar_src.width)
+                    tile_h = min(HEIGHT, prewar_src.height)
+
+                    # align/expand horizontally
+                    if w != tile_w:
+                        desired_c1 = cpre0 + tile_w
+                        if desired_c1 <= prewar_src.width:
+                            cpre1 = desired_c1
+                        else:
+                            cpre0 = max(0, prewar_src.width - tile_w)
+                            cpre1 = cpre0 + tile_w
+                        w = cpre1 - cpre0
+
+                    # align/expand vertically
+                    if h != tile_h:
+                        desired_r1 = rpre0 + tile_h
+                        if desired_r1 <= prewar_src.height:
+                            rpre1 = desired_r1
+                        else:
+                            rpre0 = max(0, prewar_src.height - tile_h)
+                            rpre1 = rpre0 + tile_h
+                        h = rpre1 - rpre0
+
+                    if rpre0 < rpre1 and cpre0 < cpre1:
+                        pre_data = prewar_src.read(1, window=((rpre0, rpre1), (cpre0, cpre1)))
+                        prewar_tile = pre_data.astype(np.float32)
             except Exception:
                 LOGGER.exception("Failed to build prewar tile for %s", origin_image)
 
