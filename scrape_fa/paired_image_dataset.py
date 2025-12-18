@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Callable
 import random
 from pathlib import Path
+from functools import lru_cache
 
 from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
@@ -11,6 +12,7 @@ from torchvision import transforms
 import h5py
 import matplotlib.pyplot as plt
 from scipy.ndimage import label
+from deprecated import deprecated
 
 from scrape_fa.util.logging_config import setup_logging
 
@@ -28,7 +30,7 @@ def remove_small_components(arr, min_area):
     return arr * mask
 
 class PairedImageDataset(Dataset):
-    def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None, is_pred: bool = False):
+    def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None):
 
         # Default feature transform: ToTensor
         if feat_transform is None:
@@ -47,34 +49,30 @@ class PairedImageDataset(Dataset):
         self.feat_transform = feat_transform
         self.label_transform = label_transform
         self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
-        self.greyscale_group = self.h5['feature']
-        self.prewar_group = self.h5['prewar']
-        self.label_group = self.h5['label']
-        self.is_pred = self.h5.attrs.get('is_pred', is_pred)
+        self.greyscale_dataset = self.h5['feature']
+        self.prewar_dataset = self.h5['prewar']
+        self.label_dataset = self.h5['label']
+        self.meta_dataset = self.h5["meta"]
         self.indices: list | None = indices
-        # Only keep pairs that exist in both groups
-        self.keys = sorted(set(self.greyscale_group.keys()) & set(self.label_group.keys()))
 
     def __len__(self):
         if self.indices is not None:
             return len(self.indices)
-        return len(self.keys)
+        return self.label_dataset.shape[0]
 
+    @lru_cache(maxsize=None)
     def __getitem__(self, idx, remap_idx: bool = True):
         if self.indices is not None and remap_idx:
-            old_idx = idx
             idx = self.indices[idx]
-        key = self.keys[idx]
         # Load greyscale and label arrays
-        grey = self.greyscale_group[key][()].squeeze().astype(np.float64)
-        label = self.label_group[key][()].astype(np.float64)
-        prewar = self.prewar_group[key][()].squeeze().astype(np.float64)
+        grey = self.greyscale_dataset[idx].squeeze()
+        label = self.label_dataset[idx]
+        prewar = self.prewar_dataset[idx].squeeze()
 
 
-        meta = {attr: self.greyscale_group[key].attrs[attr] for attr in self.greyscale_group[key].attrs}
+        meta = self.meta_dataset[idx]
 
-        if self.is_pred:
-            return {'feature': grey, 'label': label, 'meta': meta, "prewar": prewar}
+
         # Convert to PIL Images for compatibility with transforms
         grey_img = Image.fromarray(grey.astype(np.uint8))
         label_img = Image.fromarray(label.astype(np.uint8))
@@ -162,9 +160,9 @@ class PairedImageDataset(Dataset):
             arr_label = np.array(label)
         fig, axes = plt.subplots(1, 2, figsize=(10, 6), gridspec_kw={'width_ratios': [1, 6]})
         axes[0].axis('off')
-        meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = '\n'.join(f"{k}: {v}" for k, v in meta.items())
+        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
+        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
+        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
         axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
                     ha='left', va='top', transform=axes[0].transAxes)
         axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
@@ -195,9 +193,9 @@ class PairedImageDataset(Dataset):
         fig, axes = plt.subplots(1, 3, figsize=(12, 6), gridspec_kw={'width_ratios': [1, 3, 3]})
         # Left: meta text
         axes[0].axis('off')
-        meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = '\n'.join(f"{k}: {v}" for k, v in meta.items())
+        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
+        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
+        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
         axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
                     ha='left', va='top', transform=axes[0].transAxes)
         # Center: feature image
@@ -212,6 +210,7 @@ class PairedImageDataset(Dataset):
         plt.show()
 
     @classmethod
+    @deprecated(reason="Create geojson from predictions instead")
     def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str, post_processor: Callable = lambda x: x):
         """
         Create a new dataset from predictions, saving them to an HDF5 file.
@@ -234,12 +233,15 @@ class PairedImageDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = PairedImageDataset("no_labels.h5")
+    ds = PairedImageDataset("train_data_labelling.h5")
 
-    print(ds.keys)
+    count = 0
 
-    for i in range(10):
+    for i in range(1000):
         try:
-            ds.show(i)
+            if ds[i]["label"].max() > 0:
+                count += 1
         except Exception as exc:
             print("Failed to show index", i, ":", exc)
+
+    print(f"Count: {count} / {len(ds)}")

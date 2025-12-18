@@ -15,7 +15,7 @@ def setup_logging(log_file_name):
     # Stream handler (INFO level)
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.INFO)
-    stream_formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    stream_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     stream_handler.setFormatter(stream_formatter)
 
     # Add handlers to the logger

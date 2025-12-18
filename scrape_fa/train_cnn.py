@@ -45,15 +45,17 @@ def cli(config: str) -> None:
         **params['training']
     )
 
-def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, checkpoint: str | None = None) -> None:
+def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, checkpoint: str | None = None, device: str | None = None) -> None:
 
     # Set device to GPU if available
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and device is None or device == "cuda":
         device = torch.device('cuda')
-        LOGGER.info('Using GPU:', torch.cuda.get_device_name(0))
-    else:
+        LOGGER.info(f'Using GPU: {torch.cuda.get_device_name(0)}')
+    elif device is None or device == "cpu":
         device = torch.device('cpu')
         LOGGER.info('Using CPU')
+    else:
+        raise Exception(f"Could not find device {device}")
 
     if checkpoint:
         checkpoint = Path(checkpoint)
@@ -75,14 +77,14 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
 
-    criterion = lambda x, y: ((x - y).abs() * (1 + y)**2).mean() + torch.relu(-x).mean() * 10.0
+    criterion = lambda x, y: ((x - y).abs() * (1 + y)**8).mean() + torch.relu(-x).mean() * 10.0
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Create timestamped run directory
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     run_dir = os.path.join('runs', timestamp)
     os.makedirs(run_dir, exist_ok=True)
-    shutil.copy(hdf5_path, os.path.join(run_dir, 'dataset.h5'))
+    # shutil.copy(hdf5_path, os.path.join(run_dir, 'dataset.h5'))
 
     # caching splits for future use
     with open(os.path.join(run_dir, "splits.csv"), "w") as split_file:
@@ -95,7 +97,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        for entry in train_loader:
+        for i, entry in enumerate(train_loader):
             feats = torch.cat((entry["feature"], entry["prewar"]), axis=1).to(device)
             labels = entry["label"].to(device)
 
@@ -105,6 +107,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            print(f"Epoch {epoch}: Completed step {i+1} / {len(train_loader)}", end="\r")
         # Validation loss
         model.eval()
         val_loss = 0
