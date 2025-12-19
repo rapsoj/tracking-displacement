@@ -82,7 +82,7 @@ class PairedImageDataset(Dataset):
         prewar = self.feat_transform(prewar_img)
         return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
 
-    def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False) -> list["PairedImageDataset"]:
+    def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False, seed: int | None = None) -> list["PairedImageDataset"]:
         # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
 
         if save_loc is None:
@@ -110,6 +110,8 @@ class PairedImageDataset(Dataset):
 
         idcs = list(range(len(self)))
         if shuffle:
+            if seed is not None:
+                random.seed(seed)
             random.shuffle(idcs)
 
         start_idx = 0
