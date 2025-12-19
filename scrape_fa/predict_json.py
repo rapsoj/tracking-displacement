@@ -6,6 +6,9 @@ import numpy as np
 import json
 from pathlib import Path
 from scipy.ndimage import label, center_of_mass
+#import matplotlib
+#matplotlib.use("agg")
+#import matplotlib.pyplot as plt
 
 from scrape_fa.paired_image_dataset import PairedImageDataset
 from scrape_fa.simple_cnn import SimpleCNN
@@ -41,7 +44,7 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     min_area = processing_cfg.get('min_area', 20)
 
 
-    if sample_cfg and sample_cfg.get('enable', False):
+    if sample_cfg and sample_cfg.get('enable', True):
         total = len(dataset)
         size = min(sample_cfg.get('size', total), total)
         seed = sample_cfg.get('seed', None)
@@ -57,12 +60,22 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     with torch.no_grad():
         for i, entry in enumerate(subset):
             try:
-                LOGGER.info(f"Predicting image {i+1}/{len(dataset)}")
+                LOGGER.info(f"Predicting image {i+1}/{len(subset)}")
                 feats = torch.cat((entry["feature"], entry["prewar"]))
                 feats = feats.to(device)
                 outputs = model(feats)
-                # Apply sigmoid
                 probs_np = outputs.cpu().squeeze().numpy()
+                #fig, axs = plt.subplots(1, 4, figsize=(16,4))
+                #plt.sca(axs[0])
+                #plt.imshow(entry["feature"].squeeze())
+                #plt.sca(axs[1])
+                #plt.imshow(entry["prewar"].squeeze())
+                #plt.sca(axs[2])
+                #plt.imshow(entry["label"].squeeze())
+                #plt.sca(axs[3])
+                #plt.imshow(probs_np)
+                #plt.savefig(f"{i}.png")
+                #plt.close()
                 # Threshold
                 mask = (probs_np > threshold)
                 # Label regions
@@ -70,7 +83,7 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                 # Filter by min_area and extract centroids
                 coords = []
                 shape = mask.shape
-                bounds = entry['meta']
+                bounds = json.loads(entry['meta'])
                 for region_id in range(1, num_features + 1):
                     region_mask = (labeled == region_id)
                     area = np.sum(region_mask)
@@ -110,7 +123,7 @@ def bounds_to_polygon(bounds):
         [lon_min, lat_min]
     ]
 
-def save_geojson(results, out_path):
+def save_geojson(results, out_path, save_bounds: bool = True):
     """
     Save results to a GeoJSON file. Each tile's bounds as Polygon, centroids as Points.
     """
@@ -118,7 +131,7 @@ def save_geojson(results, out_path):
     for tile_idx, tile in enumerate(results):
         coords = tile['coordinates']
         bounds = tile.get('bounds')
-        if bounds:
+        if bounds and save_bounds:
             try:
                 polygon = bounds_to_polygon(bounds)
                 features.append({
@@ -180,7 +193,7 @@ def cli(config) -> None:
     results = predict_json(ds, model, device, processing_cfg, sample_cfg)
     tent_count = sum(len(res["coordinates"]) for res in results)
     LOGGER.info(f"Total number of tents: {tent_count}")
-    save_geojson(results, out_path)
+    save_geojson(results, out_path, pred_cfg.get("save_bounds", True))
 
 if __name__ == '__main__':
     cli()

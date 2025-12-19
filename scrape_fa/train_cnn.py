@@ -77,7 +77,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
 
-    criterion = lambda x, y: ((x - y).abs() * (1 + y)**8).mean() + torch.relu(-x).mean() * 10.0
+    criterion = lambda x, y: ((x - y).abs() * (1 + y)**2).mean() + torch.relu(-x).mean() * 10.0
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Create timestamped run directory
