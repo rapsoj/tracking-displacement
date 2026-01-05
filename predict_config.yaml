@@ -16,16 +16,17 @@ processing:
     max_missing_end: 0.2
     min_valid_fraction: 0.9
 prediction:
-  save_bounds: False
+  save_bounds: true
   # input: no_labels.h5
   input: test_data_labelling.h5
   output: predictions.json
-  model: runs/20251218_151309/best_model.pth
+  model: runs/prewar/best_model.pth
   # Optional sampling configuration
   sample:
     enable: true        # set to false to run on all tiles
-    size: 10           # number of random tiles to predict
-    seed: 2            # optional random seed for reproducibility
+    size: 200           # number of random tiles to predict
+    seed: 5            # optional random seed for reproducibility
   processing:
-    threshold: 7.5
-    min_area: 1
+    threshold: 1.75
+    min_area: 5
+    min_distance: 0.00004

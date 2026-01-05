@@ -42,7 +42,8 @@ torchvision = "^0.24.1"
 tif-loader = "scrape_fa.tif_loader:tif_loader"
 coordinate-scanner = "scrape_fa.coordinate_scanner:cli"
 train-cnn = "scrape_fa.train_cnn:cli"
-predict = "scrape_fa.predict:cli"
+predict = "scrape_fa.predict_processed:cli"
+predict-json = "scrape_fa.predict_json:cli"
 
 [build-system]
 requires = ["poetry-core"]

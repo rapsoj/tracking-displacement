@@ -16,6 +16,16 @@ from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging("predict_json")
 
+def too_close_criterion(pt1: tuple[float, float], pt2: tuple[float, float], min_distance: float) -> bool:
+    lat_1, lon_1 = pt1
+    lat_2, lon_2 = pt2
+
+    dist_lat = lat_1 - lat_2
+    dist_lon = lon_1 - lon_2
+    distance = (dist_lat**2 + dist_lon**2)**0.5
+
+    return distance < min_distance
+
 def interpolate_centroid(centroid, bounds, shape):
     """
     Convert centroid pixel coordinates to geographic coordinates using bounds.
@@ -32,7 +42,7 @@ def interpolate_centroid(centroid, bounds, shape):
     lon_max = bounds.get('lon_max')
     if None in (lat_min, lat_max, lon_min, lon_max):
         raise ValueError("Missing bounds in metadata")
-    lat = lat_min + (lat_max - lat_min) * (y / height)
+    lat = lat_max - (lat_max - lat_min) * (y / height)
     lon = lon_min + (lon_max - lon_min) * (x / width)
     return (lat, lon)
 
@@ -42,6 +52,7 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     """
     threshold = processing_cfg.get('threshold', 0.5)
     min_area = processing_cfg.get('min_area', 20)
+    min_distance = processing_cfg.get('min_distance', 0.0001)
 
 
     if sample_cfg and sample_cfg.get('enable', True):
@@ -91,7 +102,15 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                         centroid = center_of_mass(region_mask)
                         try:
                             coord = interpolate_centroid(centroid, bounds, shape)
-                            coords.append(coord)
+                            any_too_close = any(
+                                too_close_criterion(
+                                    coord,
+                                    existing,
+                                    min_distance=min_distance
+                                ) for existing in coords
+                            )
+                            if not any_too_close:
+                                coords.append(coord)
                         except Exception as exc:
                             LOGGER.warning(f"Interpolation error: {exc}")
                 results.append({
@@ -141,7 +160,8 @@ def save_geojson(results, out_path, save_bounds: bool = True):
                         "coordinates": [polygon]
                     },
                     "properties": {
-                        "name": "region_processed"
+                        "name": "region_processed",
+                        "source": bounds.get("origin_image")
                     }
                 })
             except Exception as exc:
@@ -164,7 +184,7 @@ def save_geojson(results, out_path, save_bounds: bool = True):
         "type": "FeatureCollection",
         "features": features
     }
-    with open(out_path, 'w') as f:
+    with open(out_path, 'w', encoding="utf-8") as f:
         json.dump(geojson, f, indent=2)
     LOGGER.info(f"GeoJSON saved to {out_path}")
 
