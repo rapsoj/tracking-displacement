@@ -40,6 +40,8 @@ training:
   learning_rate: 0.005
   training_frac: 0.1
   validation_frac: 0.025
+  model_kwargs:
+    kernel_size: 3
 prediction:
   input: processed_data.h5
   output: predictions.h5
