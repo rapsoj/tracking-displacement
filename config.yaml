@@ -42,7 +42,3 @@ training:
   validation_frac: 0.025
   model_kwargs:
     kernel_size: 3
-prediction:
-  input: processed_data.h5
-  output: predictions.h5
-  model: null # runs/20250821_134326_best_later/best_model.pth

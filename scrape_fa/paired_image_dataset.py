@@ -4,14 +4,12 @@ import random
 from pathlib import Path
 from functools import lru_cache
 
-from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 import torch
 import numpy as np
-from torchvision import transforms
 import h5py
 import matplotlib.pyplot as plt
-from scipy.ndimage import label
+from scipy.ndimage import label, gaussian_filter
 from deprecated import deprecated
 
 from scrape_fa.util.logging_config import setup_logging
@@ -29,22 +27,83 @@ def remove_small_components(arr, min_area):
     # Return filtered array (same dtype as input)
     return arr * mask
 
+
+def create_rebalanced_subset(dataset: "PairedImageDataset", n_frac: float, seed: int | None = None) -> "PairedImageDataset":
+    """
+    Create a rebalanced dataset with negative labels randomly sampled to constitute a fraction n_frac of the data.
+
+    :param dataset: The PairedImageDataset to rebalance
+    :param n_frac: Fraction of data that should be negative samples (0 <= n_frac < 1)
+    :param seed: Random seed for sampling
+    :return: A new PairedImageDataset with the rebalanced subset
+    """
+    if not (0.0 <= n_frac < 1.0):
+        raise ValueError(f"n_frac must be between 0 and 1 (exclusive of 1), got {n_frac}")
+
+    pos_indices = []
+    neg_indices = []
+
+    LOGGER.info("Scanning dataset for positive/negative balance...")
+    for i in range(len(dataset)):
+        if dataset.label_is_negative(i):
+            neg_indices.append(i)
+        else:
+            pos_indices.append(i)
+
+    n_pos = len(pos_indices)
+    n_neg_total = len(neg_indices)
+    LOGGER.info(f"Found {n_pos} positive and {n_neg_total} negative samples.")
+
+    if n_pos == 0:
+        raise ValueError("Cannot create rebalanced dataset: No positive samples found.")
+
+    # Calculate needed negatives: n_neg / (n_neg + n_pos) = n_frac
+    n_neg_needed = int(round((n_frac * n_pos) / (1.0 - n_frac)))
+
+    if n_neg_needed > n_neg_total:
+        max_n_neg = n_neg_total
+        max_frac = max_n_neg / (max_n_neg + n_pos)
+        raise ValueError(
+            f"Cannot create rebalanced dataset with n_frac={n_frac}. "
+            f"Need {n_neg_needed} negatives but only have {n_neg_total}. "
+            f"Maximum possible n_frac is {max_frac:.4f}"
+        )
+
+    if seed is not None:
+        random.seed(seed)
+
+    sampled_neg_indices = random.sample(neg_indices, n_neg_needed)
+    selected_indices_local = pos_indices + sampled_neg_indices
+    random.shuffle(selected_indices_local)
+
+    # Resolve to absolute HDF5 indices
+    if dataset.indices is not None:
+        final_indices = [dataset.indices[i] for i in selected_indices_local]
+    else:
+        final_indices = selected_indices_local
+
+    LOGGER.info(f"Created rebalanced dataset with {len(pos_indices)} positives and {len(sampled_neg_indices)} negatives (n_frac={n_frac:.2f})")
+
+    return PairedImageDataset(
+        dataset.hdf5_path,
+        feat_transform=dataset.feat_transform,
+        label_transform=dataset.label_transform,
+        indices=final_indices
+    )
+
+
 class PairedImageDataset(Dataset):
     def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None):
 
-        # Default feature transform: ToTensor
+        # Default feature transform: numpy array to tensor
         if feat_transform is None:
-            feat_transform = transforms.ToTensor()
-        # Default label transform: Gaussian blur + ToTensor
+            def feat_transform(arr):
+                return torch.from_numpy(arr).unsqueeze(0)
+        # Default label transform: Gaussian blur + to tensor
         if label_transform is None:
-            class LabelBlur:
-                def __call__(self, img):
-                    return img.filter(ImageFilter.GaussianBlur(radius=3))
-            label_transform = transforms.Compose([
-                LabelBlur(),
-                transforms.ToTensor(),
-                lambda x: x * 20
-            ])
+            def label_transform(arr):
+                blurred = gaussian_filter(arr, sigma=3)
+                return torch.from_numpy(blurred).unsqueeze(0) * 20
         self.hdf5_path = hdf5_path
         self.feat_transform = feat_transform
         self.label_transform = label_transform
@@ -66,21 +125,22 @@ class PairedImageDataset(Dataset):
             idx = self.indices[idx]
         # Load greyscale and label arrays
         grey = self.greyscale_dataset[idx].squeeze()
-        label = self.label_dataset[idx]
+        label_arr = self.label_dataset[idx]
         prewar = self.prewar_dataset[idx].squeeze()
-
 
         meta = self.meta_dataset[idx]
 
-
-        # Convert to PIL Images for compatibility with transforms
-        grey_img = Image.fromarray(grey.astype(np.uint8))
-        label_img = Image.fromarray(label.astype(np.uint8))
-        prewar_img = Image.fromarray(prewar.astype(np.uint8))
-        feat = self.feat_transform(grey_img)
-        lab = self.label_transform(label_img)
-        prewar = self.feat_transform(prewar_img)
+        # Apply transforms directly to numpy arrays
+        feat = self.feat_transform(grey)
+        lab = self.label_transform(label_arr)
+        prewar = self.feat_transform(prewar)
         return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
+
+    def label_is_negative(self, i):
+        sample = self[i]
+        label = sample['label']
+        return (label.max() == 0).item()
+
 
     def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False, seed: int | None = None) -> list["PairedImageDataset"]:
         # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
@@ -135,6 +195,7 @@ class PairedImageDataset(Dataset):
             start_idx = end_idx
 
         return datasets, idcs_list
+
 
 
     def close(self):
