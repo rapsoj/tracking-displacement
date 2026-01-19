@@ -53,6 +53,7 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     threshold = processing_cfg.get('threshold', 0.5)
     min_area = processing_cfg.get('min_area', 20)
     min_distance = processing_cfg.get('min_distance', 0.0001)
+    crop_pixels = processing_cfg.get('crop_pixels', 0)
 
 
     if sample_cfg and sample_cfg.get('enable', True):
@@ -76,17 +77,13 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                 feats = feats.to(device)
                 outputs = model(feats)
                 probs_np = outputs.cpu().squeeze().numpy()
-                #fig, axs = plt.subplots(1, 4, figsize=(16,4))
-                #plt.sca(axs[0])
-                #plt.imshow(entry["feature"].squeeze())
-                #plt.sca(axs[1])
-                #plt.imshow(entry["prewar"].squeeze())
-                #plt.sca(axs[2])
-                #plt.imshow(entry["label"].squeeze())
-                #plt.sca(axs[3])
-                #plt.imshow(probs_np)
-                #plt.savefig(f"{i}.png")
-                #plt.close()
+
+                if crop_pixels > 0:
+                    probs_np[:crop_pixels, :] = 0
+                    probs_np[-crop_pixels:, :] = 0
+                    probs_np[:, :crop_pixels] = 0
+                    probs_np[:, -crop_pixels:] = 0
+
                 # Threshold
                 mask = (probs_np > threshold)
                 # Label regions
