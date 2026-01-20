@@ -628,14 +628,14 @@ def scan_grouped_coordinates(
         for lon in tqdm(lon_iter, desc=f"{base_name} lon"):
             for lat in lat_iter:
                 # lookup features for this tile (keys were rounded to 5 decimals in _group_coords)
-                base_lon = round(math.floor(lon / step) * step, 5)
-                base_lat = round(math.floor(lat / step) * step, 5)
-                key = (base_lon, base_lat)
-                feats_for_tile = grouped.get(key, [])
+                # base_lon = round(math.floor(lon / step) * step, 5)
+                # base_lat = round(math.floor(lat / step) * step, 5)
+                # key = (base_lon, base_lat)
+                # feats_for_tile = grouped.get(key, [])
 
                 grey, label, meta, prewar_tile = process_group(
                     src,
-                    feats_for_tile,
+                    features,
                     lon,
                     lat,
                     step,

@@ -10,22 +10,10 @@ import numpy as np
 import h5py
 import matplotlib.pyplot as plt
 from scipy.ndimage import label, gaussian_filter
-from deprecated import deprecated
 
 from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging("paired-image-ds")
-
-
-def remove_small_components(arr, min_area):
-    # Label connected components
-    labeled, num_features = label(arr)
-    # Count area of each component (component 0 is background)
-    areas = np.bincount(labeled.ravel())
-    # Create mask for components above threshold
-    mask = np.isin(labeled, np.where(areas >= min_area)[0])
-    # Return filtered array (same dtype as input)
-    return arr * mask
 
 
 def create_rebalanced_subset(dataset: "PairedImageDataset", n_frac: float, seed: int | None = None) -> "PairedImageDataset":
@@ -102,8 +90,8 @@ class PairedImageDataset(Dataset):
         # Default label transform: Gaussian blur + to tensor
         if label_transform is None:
             def label_transform(arr):
-                blurred = gaussian_filter(arr, sigma=3)
-                return torch.from_numpy(blurred).unsqueeze(0) * 20
+                blurred = gaussian_filter(arr, sigma=2)
+                return torch.from_numpy(blurred).unsqueeze(0) / 120  # recalibrated blurring and scaling
         self.hdf5_path = hdf5_path
         self.feat_transform = feat_transform
         self.label_transform = label_transform
@@ -232,10 +220,11 @@ class PairedImageDataset(Dataset):
         axes[1].set_title('Data')
         axes[1].axis('off')
 
-        arr_label = np.where(arr_label > 1, 1., 0.)
-        arr_label = remove_small_components(arr_label, 25)
-
         axes[1].imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label, interpolation='none')
+        axes[1].hlines(y=arr_label.shape[0] // 3, xmin=0, xmax=arr_label.shape[1], colors='red', linestyles='--')
+        axes[1].hlines(y=2 * arr_label.shape[0] // 3, xmin=0, xmax=arr_label.shape[1], colors='red', linestyles='--')
+        axes[1].vlines(x=arr_label.shape[1] // 3, ymin=0, ymax=arr_label.shape[0], colors='red', linestyles='--')
+        axes[1].vlines(x=2 * arr_label.shape[1] // 3, ymin=0, ymax=arr_label.shape[0], colors='red', linestyles='--')
         plt.tight_layout()
         plt.show()
 
@@ -266,7 +255,7 @@ class PairedImageDataset(Dataset):
         axes[1].set_title('Feature')
         axes[1].axis('off')
         # Right: label image
-        axes[2].imshow(arr_label[::-1, :], cmap='gray')
+        axes[2].imshow(arr_label, cmap='gray')
         axes[2].set_title('Label')
         axes[2].axis('off')
         plt.tight_layout()
@@ -274,15 +263,13 @@ class PairedImageDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = PairedImageDataset("train_data_labelling.h5")
+    ds = PairedImageDataset("test_data_labelling.h5")
 
-    count = 0
+    n_non_null, counts = np.unique(np.nonzero(ds.label_dataset)[0], return_counts=True)
+    sorting = np.argsort(counts)
+    counts = counts[sorting] // 9
+    counts[counts == 0] = 1
+    n_non_null = n_non_null[sorting]
 
-    for i in range(1000):
-        try:
-            if ds[i]["label"].max() > 0:
-                count += 1
-        except Exception as exc:
-            print("Failed to show index", i, ":", exc)
+    ds.show_overlay(n_non_null[-10])
 
-    print(f"Count: {count} / {len(ds)}")
