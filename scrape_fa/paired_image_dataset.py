@@ -272,28 +272,6 @@ class PairedImageDataset(Dataset):
         plt.tight_layout()
         plt.show()
 
-    @classmethod
-    @deprecated(reason="Create geojson from predictions instead")
-    def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str, post_processor: Callable = lambda x: x):
-        """
-        Create a new dataset from predictions, saving them to an HDF5 file.
-        """
-        with h5py.File(output_path, 'w') as h5f:
-            feat_group = h5f.create_group('feature')
-            label_group = h5f.create_group('label')
-            prewar_group = h5f.create_group("prewar")
-            h5f.attrs['is_pred'] = True
-            for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
-                key = f"tile_{i:05d}"
-                feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
-                prewar_group.create_dataset(key, data=sample["prewar"].cpu().numpy().squeeze())
-                label_group.create_dataset(key, data=post_processor(pred.cpu().numpy()))
-                for attr, value in sample['meta'].items():
-                    feat_group[key].attrs[attr] = value
-                    label_group[key].attrs[attr] = value
-
-        return cls(output_path, label_transform=lambda x: x, feat_transform=base_ds.feat_transform, indices=base_ds.indices, is_pred=True)
-
 
 if __name__ == "__main__":
     ds = PairedImageDataset("train_data_labelling.h5")
