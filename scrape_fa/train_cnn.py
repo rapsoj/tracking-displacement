@@ -45,7 +45,7 @@ def cli(config: str) -> None:
         **params['training']
     )
 
-def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None) -> None:
+def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, sigma: float = 3.0, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None) -> None:
 
     model_kwargs = model_kwargs or {}
 
@@ -71,8 +71,9 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         save_loc = None
 
     # Load and shuffle dataset
-    dataset = PairedImageDataset(hdf5_path)
+    dataset = PairedImageDataset(hdf5_path, sigma=sigma)
     splits = [training_frac, validation_frac, 1-training_frac-validation_frac]
+
     (train_set, val_set, test_set), idcs_list = dataset.create_subsets(splits, shuffle=True, save_loc=save_loc)
     train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate)
     val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)

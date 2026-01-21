@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Callable
 import random
 from pathlib import Path
 from functools import lru_cache
@@ -8,99 +7,45 @@ from torch.utils.data import Dataset
 import torch
 import numpy as np
 import h5py
-import matplotlib.pyplot as plt
-from scipy.ndimage import label, gaussian_filter
+from scipy.ndimage import gaussian_filter
 
 from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging("paired-image-ds")
 
 
-def create_rebalanced_subset(dataset: "PairedImageDataset", n_frac: float, seed: int | None = None) -> "PairedImageDataset":
-    """
-    Create a rebalanced dataset with negative labels randomly sampled to constitute a fraction n_frac of the data.
-
-    :param dataset: The PairedImageDataset to rebalance
-    :param n_frac: Fraction of data that should be negative samples (0 <= n_frac < 1)
-    :param seed: Random seed for sampling
-    :return: A new PairedImageDataset with the rebalanced subset
-    """
-    if not (0.0 <= n_frac < 1.0):
-        raise ValueError(f"n_frac must be between 0 and 1 (exclusive of 1), got {n_frac}")
-
-    pos_indices = []
-    neg_indices = []
-
-    LOGGER.info("Scanning dataset for positive/negative balance...")
-    for i in range(len(dataset)):
-        if dataset.label_is_negative(i):
-            neg_indices.append(i)
-        else:
-            pos_indices.append(i)
-
-    n_pos = len(pos_indices)
-    n_neg_total = len(neg_indices)
-    LOGGER.info(f"Found {n_pos} positive and {n_neg_total} negative samples.")
-
-    if n_pos == 0:
-        raise ValueError("Cannot create rebalanced dataset: No positive samples found.")
-
-    # Calculate needed negatives: n_neg / (n_neg + n_pos) = n_frac
-    n_neg_needed = int(round((n_frac * n_pos) / (1.0 - n_frac)))
-
-    if n_neg_needed > n_neg_total:
-        max_n_neg = n_neg_total
-        max_frac = max_n_neg / (max_n_neg + n_pos)
-        raise ValueError(
-            f"Cannot create rebalanced dataset with n_frac={n_frac}. "
-            f"Need {n_neg_needed} negatives but only have {n_neg_total}. "
-            f"Maximum possible n_frac is {max_frac:.4f}"
-        )
-
-    if seed is not None:
-        random.seed(seed)
-
-    sampled_neg_indices = random.sample(neg_indices, n_neg_needed)
-    selected_indices_local = pos_indices + sampled_neg_indices
-    random.shuffle(selected_indices_local)
-
-    # Resolve to absolute HDF5 indices
-    if dataset.indices is not None:
-        final_indices = [dataset.indices[i] for i in selected_indices_local]
-    else:
-        final_indices = selected_indices_local
-
-    LOGGER.info(f"Created rebalanced dataset with {len(pos_indices)} positives and {len(sampled_neg_indices)} negatives (n_frac={n_frac:.2f})")
-
-    return PairedImageDataset(
-        dataset.hdf5_path,
-        feat_transform=dataset.feat_transform,
-        label_transform=dataset.label_transform,
-        indices=final_indices
-    )
-
-
 class PairedImageDataset(Dataset):
-    def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None):
+    def __init__(self, hdf5_path, indices: list[int] | None = None, sigma: float = 3.0):
+        self.hdf5_path = hdf5_path
+        self.indices: list | None = indices
+        self.sigma = sigma
+
+        # Calculate normalization constant dynamically
+        # Create dummy image: 100x100 black image with 3x3 white square in center
+        dummy = np.zeros((100, 100), dtype=np.float32)
+        dummy[49:52, 49:52] = 255.0
+        blurred_dummy = gaussian_filter(dummy, sigma=self.sigma)
+        self.norm_constant = float(np.max(blurred_dummy))
+
+        LOGGER.info(f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}")
 
         # Default feature transform: numpy array to tensor
-        if feat_transform is None:
-            def feat_transform(arr):
-                return torch.from_numpy(arr).unsqueeze(0)
-        # Default label transform: Gaussian blur + to tensor
-        if label_transform is None:
-            def label_transform(arr):
-                blurred = gaussian_filter(arr, sigma=2)
-                return torch.from_numpy(blurred).unsqueeze(0) / 120  # recalibrated blurring and scaling
-        self.hdf5_path = hdf5_path
-        self.feat_transform = feat_transform
+        self.feat_transform = lambda arr: torch.from_numpy(arr).unsqueeze(0)
+
+        # Label transform: Gaussian blur + normalization + to tensor
+        def label_transform(arr):
+            # Ensure float32
+            arr = arr.astype(np.float32)
+            blurred = gaussian_filter(arr, sigma=self.sigma)
+            return torch.from_numpy(blurred).unsqueeze(0) / self.norm_constant
+
         self.label_transform = label_transform
+
         self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
         self.greyscale_dataset = self.h5['feature']
         self.prewar_dataset = self.h5['prewar']
         self.label_dataset = self.h5['label']
         self.meta_dataset = self.h5["meta"]
-        self.indices: list | None = indices
 
     def __len__(self):
         if self.indices is not None:
@@ -174,9 +119,8 @@ class PairedImageDataset(Dataset):
             datasets.append(
                 PairedImageDataset(
                     self.hdf5_path,
-                    feat_transform=self.feat_transform,
-                    label_transform=self.label_transform,
-                    indices=subset_indices
+                    indices=subset_indices,
+                    sigma=self.sigma
                 )
             )
 
@@ -189,87 +133,4 @@ class PairedImageDataset(Dataset):
     def close(self):
         self.h5.close()
 
-    def show(self, idx: int, overlay: bool = True) -> None:
-        if overlay:
-            self.show_overlay(idx)
-        else:
-            self.show_split(idx)
-
-    def show_overlay(self, idx: int) -> None:
-        sample = self[idx]
-        feature = sample['feature']
-        label = sample['label']
-        meta = sample['meta']
-
-        if isinstance(feature, torch.Tensor):
-            arr_feat = feature.squeeze().cpu().numpy()
-        else:
-            arr_feat = np.array(feature)
-        if isinstance(label, torch.Tensor):
-            arr_label = label.squeeze().cpu().numpy()
-        else:
-            arr_label = np.array(label)
-        fig, axes = plt.subplots(1, 2, figsize=(10, 6), gridspec_kw={'width_ratios': [1, 6]})
-        axes[0].axis('off')
-        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
-        axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
-                    ha='left', va='top', transform=axes[0].transAxes)
-        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
-        axes[1].set_title('Data')
-        axes[1].axis('off')
-
-        axes[1].imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label, interpolation='none')
-        axes[1].hlines(y=arr_label.shape[0] // 3, xmin=0, xmax=arr_label.shape[1], colors='red', linestyles='--')
-        axes[1].hlines(y=2 * arr_label.shape[0] // 3, xmin=0, xmax=arr_label.shape[1], colors='red', linestyles='--')
-        axes[1].vlines(x=arr_label.shape[1] // 3, ymin=0, ymax=arr_label.shape[0], colors='red', linestyles='--')
-        axes[1].vlines(x=2 * arr_label.shape[1] // 3, ymin=0, ymax=arr_label.shape[0], colors='red', linestyles='--')
-        plt.tight_layout()
-        plt.show()
-
-    def show_split(self, idx: int) -> None:
-        sample = self[idx]
-        feature = sample['feature']
-        label = sample['label']
-        meta = sample['meta']
-        # Convert tensors to numpy for plotting
-        if isinstance(feature, torch.Tensor):
-            arr_feat = feature.squeeze().cpu().numpy()
-        else:
-            arr_feat = np.array(feature)
-        if isinstance(label, torch.Tensor):
-            arr_label = label.squeeze().cpu().numpy()
-        else:
-            arr_label = np.array(label)
-        fig, axes = plt.subplots(1, 3, figsize=(12, 6), gridspec_kw={'width_ratios': [1, 3, 3]})
-        # Left: meta text
-        axes[0].axis('off')
-        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
-        axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
-                    ha='left', va='top', transform=axes[0].transAxes)
-        # Center: feature image
-        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
-        axes[1].set_title('Feature')
-        axes[1].axis('off')
-        # Right: label image
-        axes[2].imshow(arr_label, cmap='gray')
-        axes[2].set_title('Label')
-        axes[2].axis('off')
-        plt.tight_layout()
-        plt.show()
-
-
-if __name__ == "__main__":
-    ds = PairedImageDataset("test_data_labelling.h5")
-
-    n_non_null, counts = np.unique(np.nonzero(ds.label_dataset)[0], return_counts=True)
-    sorting = np.argsort(counts)
-    counts = counts[sorting] // 9
-    counts[counts == 0] = 1
-    n_non_null = n_non_null[sorting]
-
-    ds.show_overlay(n_non_null[-10])
 
