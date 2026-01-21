@@ -25,7 +25,7 @@ class PairedImageDataset(Dataset):
         dummy = np.zeros((100, 100), dtype=np.float32)
         dummy[49:52, 49:52] = 255.0
         blurred_dummy = gaussian_filter(dummy, sigma=self.sigma)
-        self.norm_constant = float(np.max(blurred_dummy))
+        self.norm_constant = float(np.max(blurred_dummy)) * 2.3  # had to be increased due to tents close together
 
         LOGGER.info(f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}")
 
