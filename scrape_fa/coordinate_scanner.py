@@ -45,7 +45,8 @@ def _group_coords(features: list[dict[str, Any]], step: float) -> dict[tuple[flo
         base_lat = math.floor(lat / step) * step
         # include 3x3 neighbourhood (original behaviour)
         for i in (-1, 0, 1):
-            for j in (-1, 0, 1):
+            # Slightly dirty fix to solve problem with subtiles, but it doesn't really impact performance
+            for j in (-2, -1, 0, 1, 2):
                 grouped[(round(base_lon + i * step, 5), round(base_lat + j * step, 5))].append(feat)
     return grouped
 
@@ -628,14 +629,14 @@ def scan_grouped_coordinates(
         for lon in tqdm(lon_iter, desc=f"{base_name} lon"):
             for lat in lat_iter:
                 # lookup features for this tile (keys were rounded to 5 decimals in _group_coords)
-                # base_lon = round(math.floor(lon / step) * step, 5)
-                # base_lat = round(math.floor(lat / step) * step, 5)
-                # key = (base_lon, base_lat)
-                # feats_for_tile = grouped.get(key, [])
+                base_lon = round(math.floor(lon / step) * step, 5)
+                base_lat = round(math.floor(lat / step) * step, 5)
+                key = (base_lon, base_lat)
+                feats_for_tile = grouped.get(key, [])
 
                 grey, label, meta, prewar_tile = process_group(
                     src,
-                    features,
+                    feats_for_tile,
                     lon,
                     lat,
                     step,
