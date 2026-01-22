@@ -3,9 +3,9 @@ import torch.nn as nn
 
 class SimpleCNN(nn.Module):
 
-    ALLOWED_KWARGS = set()
+    ALLOWED_KWARGS = set("kernel_size")
 
-    def __init__(self, n_channels, n_classes=1, kernel_size=3, **kwargs):
+    def __init__(self, n_channels, n_classes=1, **kwargs):
         super(SimpleCNN, self).__init__()
         # Validate that only expected keyword arguments are provided.
         unexpected_keys = set(kwargs) - self.ALLOWED_KWARGS
@@ -17,7 +17,7 @@ class SimpleCNN(nn.Module):
         self.config = {
             'n_channels': n_channels,
             'n_classes': n_classes,
-            'kernel_size': kernel_size,
+            'kernel_size': kwargs.pop('kernel_size', 3),
             **kwargs,
         }
         self.conv1 = nn.Conv2d(n_channels, 8, kernel_size=kernel_size, padding=kernel_size//2)
