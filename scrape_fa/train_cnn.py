@@ -61,7 +61,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     if checkpoint:
         checkpoint = Path(checkpoint)
-        LOGGER.warn("Loading model from checkpoint, ignoring model_kwargs.")
+        LOGGER.warning("Loading model from checkpoint, ignoring model_kwargs.")
         model = SimpleCNN.from_pth(checkpoint).to(device)
         hdf5_path_obj = Path(hdf5_path)
 
