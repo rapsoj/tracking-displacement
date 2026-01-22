@@ -50,7 +50,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     model_kwargs = model_kwargs or {}
 
     # Set device to GPU if available
-    if torch.cuda.is_available() and device is None or device == "cuda":
+    if torch.cuda.is_available() and (device is None or device == "cuda"):
         device = torch.device('cuda')
         LOGGER.info(f'Using GPU: {torch.cuda.get_device_name(0)}')
     elif device is None or device == "cpu":

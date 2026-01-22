@@ -1,4 +1,4 @@
-import ast
+import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,9 +31,9 @@ class DatasetViewer:
             meta = meta.decode('utf-8')
 
         try:
-            meta_dict = ast.literal_eval(str(meta))
+            meta_dict = json.loads(str(meta))
             meta_text = '\n'.join(f"{k}: {v}" for k, v in meta_dict.items())
-        except (ValueError, SyntaxError):
+        except json.JSONDecodeError:
             meta_text = str(meta)
 
         return arr_feat, arr_label, meta_text

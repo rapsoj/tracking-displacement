@@ -2,9 +2,24 @@ import torch
 import torch.nn as nn
 
 class SimpleCNN(nn.Module):
+
+    ALLOWED_KWARGS = set()
+
     def __init__(self, n_channels, n_classes=1, kernel_size=3, **kwargs):
         super(SimpleCNN, self).__init__()
-        self.config = {'n_channels': n_channels, 'n_classes': n_classes, 'kernel_size': kernel_size, **kwargs}
+        # Validate that only expected keyword arguments are provided.
+        unexpected_keys = set(kwargs) - self.ALLOWED_KWARGS
+        if unexpected_keys:
+            raise TypeError(
+                f"Unexpected keyword argument(s) for {self.__class__.__name__}: "
+                f"{', '.join(sorted(unexpected_keys))}"
+            )
+        self.config = {
+            'n_channels': n_channels,
+            'n_classes': n_classes,
+            'kernel_size': kernel_size,
+            **kwargs,
+        }
         self.conv1 = nn.Conv2d(n_channels, 8, kernel_size=kernel_size, padding=kernel_size//2)
         self.relu1 = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(8, 16, kernel_size=kernel_size, padding=kernel_size//2)

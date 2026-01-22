@@ -45,7 +45,8 @@ def _group_coords(features: list[dict[str, Any]], step: float) -> dict[tuple[flo
         base_lat = math.floor(lat / step) * step
         # include 3x3 neighbourhood (original behaviour)
         for i in (-1, 0, 1):
-            # Slightly dirty fix to solve problem with subtiles, but it doesn't really impact performance
+            # Slightly dirty fix, easiest way to ensure all subtiles are labelled in the dataset
+            # Previously, upper three subtiles had labels = 0, which caused underfitting
             for j in (-2, -1, 0, 1, 2):
                 grouped[(round(base_lon + i * step, 5), round(base_lat + j * step, 5))].append(feat)
     return grouped

@@ -25,27 +25,28 @@ class PairedImageDataset(Dataset):
         dummy = np.zeros((100, 100), dtype=np.float32)
         dummy[49:52, 49:52] = 255.0
         blurred_dummy = gaussian_filter(dummy, sigma=self.sigma)
-        self.norm_constant = float(np.max(blurred_dummy)) * 2.3  # had to be increased due to tents close together
+        # Rescaled constant so that value of 1 is never exceeded, even with multiple tents together
+        self.norm_constant = float(np.max(blurred_dummy)) * 2.3
 
         LOGGER.info(f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}")
 
         # Default feature transform: numpy array to tensor
-        self.feat_transform = lambda arr: torch.from_numpy(arr).unsqueeze(0)
-
-        # Label transform: Gaussian blur + normalization + to tensor
-        def label_transform(arr):
-            # Ensure float32
-            arr = arr.astype(np.float32)
-            blurred = gaussian_filter(arr, sigma=self.sigma)
-            return torch.from_numpy(blurred).unsqueeze(0) / self.norm_constant
-
-        self.label_transform = label_transform
 
         self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
         self.greyscale_dataset = self.h5['feature']
         self.prewar_dataset = self.h5['prewar']
         self.label_dataset = self.h5['label']
         self.meta_dataset = self.h5["meta"]
+
+    @staticmethod
+    def feat_transform(arr):
+        return torch.from_numpy(arr).unsqueeze(0)
+
+
+    def label_transform(self, arr):
+        arr = arr.astype(np.float32)
+        blurred = gaussian_filter(arr, sigma=self.sigma)
+        return torch.from_numpy(blurred).unsqueeze(0) / self.norm_constant
 
     def __len__(self):
         if self.indices is not None:
