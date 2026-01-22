@@ -65,9 +65,9 @@ class PairedImageDataset(Dataset):
         meta = self.meta_dataset[idx]
 
         # Apply transforms directly to numpy arrays
-        feat = self.feat_transform(grey)
+        feat = PairedImageDataset.feat_transform(grey)
         lab = self.label_transform(label_arr)
-        prewar = self.feat_transform(prewar)
+        prewar = PairedImageDataset.feat_transform(prewar)
         return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
 
     def label_is_negative(self, i):
