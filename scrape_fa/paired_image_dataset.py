@@ -1,59 +1,52 @@
 from __future__ import annotations
-from typing import Callable
 import random
 from pathlib import Path
 from functools import lru_cache
 
-from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 import torch
 import numpy as np
-from torchvision import transforms
 import h5py
-import matplotlib.pyplot as plt
-from scipy.ndimage import label
-from deprecated import deprecated
+from scipy.ndimage import gaussian_filter
 
 from scrape_fa.util.logging_config import setup_logging
 
 LOGGER = setup_logging("paired-image-ds")
 
 
-def remove_small_components(arr, min_area):
-    # Label connected components
-    labeled, num_features = label(arr)
-    # Count area of each component (component 0 is background)
-    areas = np.bincount(labeled.ravel())
-    # Create mask for components above threshold
-    mask = np.isin(labeled, np.where(areas >= min_area)[0])
-    # Return filtered array (same dtype as input)
-    return arr * mask
-
 class PairedImageDataset(Dataset):
-    def __init__(self, hdf5_path, feat_transform: Callable | None = None, label_transform: Callable | None = None, indices: list[int] | None = None):
-
-        # Default feature transform: ToTensor
-        if feat_transform is None:
-            feat_transform = transforms.ToTensor()
-        # Default label transform: Gaussian blur + ToTensor
-        if label_transform is None:
-            class LabelBlur:
-                def __call__(self, img):
-                    return img.filter(ImageFilter.GaussianBlur(radius=3))
-            label_transform = transforms.Compose([
-                LabelBlur(),
-                transforms.ToTensor(),
-                lambda x: x * 20
-            ])
+    def __init__(self, hdf5_path, indices: list[int] | None = None, sigma: float = 3.0):
         self.hdf5_path = hdf5_path
-        self.feat_transform = feat_transform
-        self.label_transform = label_transform
+        self.indices: list | None = indices
+        self.sigma = sigma
+
+        # Calculate normalization constant dynamically
+        # Create dummy image: 100x100 black image with 3x3 white square in center
+        dummy = np.zeros((100, 100), dtype=np.float32)
+        dummy[49:52, 49:52] = 255.0
+        blurred_dummy = gaussian_filter(dummy, sigma=self.sigma)
+        # Rescaled constant so that value of 1 is never exceeded, even with multiple tents together
+        self.norm_constant = float(np.max(blurred_dummy)) * 2.3
+
+        LOGGER.info(f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}")
+
+        # Default feature transform: numpy array to tensor
+
         self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
         self.greyscale_dataset = self.h5['feature']
         self.prewar_dataset = self.h5['prewar']
         self.label_dataset = self.h5['label']
         self.meta_dataset = self.h5["meta"]
-        self.indices: list | None = indices
+
+    @staticmethod
+    def feat_transform(arr):
+        return torch.from_numpy(arr).unsqueeze(0)
+
+
+    def label_transform(self, arr):
+        arr = arr.astype(np.float32)
+        blurred = gaussian_filter(arr, sigma=self.sigma)
+        return torch.from_numpy(blurred).unsqueeze(0) / self.norm_constant
 
     def __len__(self):
         if self.indices is not None:
@@ -66,21 +59,22 @@ class PairedImageDataset(Dataset):
             idx = self.indices[idx]
         # Load greyscale and label arrays
         grey = self.greyscale_dataset[idx].squeeze()
-        label = self.label_dataset[idx]
+        label_arr = self.label_dataset[idx]
         prewar = self.prewar_dataset[idx].squeeze()
-
 
         meta = self.meta_dataset[idx]
 
-
-        # Convert to PIL Images for compatibility with transforms
-        grey_img = Image.fromarray(grey.astype(np.uint8))
-        label_img = Image.fromarray(label.astype(np.uint8))
-        prewar_img = Image.fromarray(prewar.astype(np.uint8))
-        feat = self.feat_transform(grey_img)
-        lab = self.label_transform(label_img)
-        prewar = self.feat_transform(prewar_img)
+        # Apply transforms directly to numpy arrays
+        feat = PairedImageDataset.feat_transform(grey)
+        lab = self.label_transform(label_arr)
+        prewar = PairedImageDataset.feat_transform(prewar)
         return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
+
+    def label_is_negative(self, i):
+        sample = self[i]
+        label = sample['label']
+        return (label.max() == 0).item()
+
 
     def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False, seed: int | None = None) -> list["PairedImageDataset"]:
         # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
@@ -126,9 +120,8 @@ class PairedImageDataset(Dataset):
             datasets.append(
                 PairedImageDataset(
                     self.hdf5_path,
-                    feat_transform=self.feat_transform,
-                    label_transform=self.label_transform,
-                    indices=subset_indices
+                    indices=subset_indices,
+                    sigma=self.sigma
                 )
             )
 
@@ -137,113 +130,8 @@ class PairedImageDataset(Dataset):
         return datasets, idcs_list
 
 
+
     def close(self):
         self.h5.close()
 
-    def show(self, idx: int, overlay: bool = True) -> None:
-        if overlay:
-            self.show_overlay(idx)
-        else:
-            self.show_split(idx)
 
-    def show_overlay(self, idx: int) -> None:
-        sample = self[idx]
-        feature = sample['feature']
-        label = sample['label']
-        meta = sample['meta']
-
-        if isinstance(feature, torch.Tensor):
-            arr_feat = feature.squeeze().cpu().numpy()
-        else:
-            arr_feat = np.array(feature)
-        if isinstance(label, torch.Tensor):
-            arr_label = label.squeeze().cpu().numpy()
-        else:
-            arr_label = np.array(label)
-        fig, axes = plt.subplots(1, 2, figsize=(10, 6), gridspec_kw={'width_ratios': [1, 6]})
-        axes[0].axis('off')
-        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
-        axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
-                    ha='left', va='top', transform=axes[0].transAxes)
-        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
-        axes[1].set_title('Data')
-        axes[1].axis('off')
-
-        arr_label = np.where(arr_label > 1, 1., 0.)
-        arr_label = remove_small_components(arr_label, 25)
-
-        axes[1].imshow(np.ones_like(arr_label), cmap="spring", alpha=arr_label, interpolation='none')
-        plt.tight_layout()
-        plt.show()
-
-    def show_split(self, idx: int) -> None:
-        sample = self[idx]
-        feature = sample['feature']
-        label = sample['label']
-        meta = sample['meta']
-        # Convert tensors to numpy for plotting
-        if isinstance(feature, torch.Tensor):
-            arr_feat = feature.squeeze().cpu().numpy()
-        else:
-            arr_feat = np.array(feature)
-        if isinstance(label, torch.Tensor):
-            arr_label = label.squeeze().cpu().numpy()
-        else:
-            arr_label = np.array(label)
-        fig, axes = plt.subplots(1, 3, figsize=(12, 6), gridspec_kw={'width_ratios': [1, 3, 3]})
-        # Left: meta text
-        axes[0].axis('off')
-        # meta["origin_date"] = f"{meta['origin_date'][:4]}-{meta['origin_date'][4:6]}-{meta['origin_date'][6:]}"
-        # meta["origin_image"] = "_".join([comp for comp in meta["origin_image"].split("_")[:4] if not comp.isdigit()])
-        meta_text = "N/A"  # '\n'.join(f"{k}: {v}" for k, v in meta.items())
-        axes[0].text(0.1, 0.9, meta_text, fontsize=12, color='black',
-                    ha='left', va='top', transform=axes[0].transAxes)
-        # Center: feature image
-        axes[1].imshow(arr_feat, cmap='gray', interpolation='none')
-        axes[1].set_title('Feature')
-        axes[1].axis('off')
-        # Right: label image
-        axes[2].imshow(arr_label[::-1, :], cmap='gray')
-        axes[2].set_title('Label')
-        axes[2].axis('off')
-        plt.tight_layout()
-        plt.show()
-
-    @classmethod
-    @deprecated(reason="Create geojson from predictions instead")
-    def from_predictions(cls, base_ds: "PairedImageDataset", predictions: list[torch.Tensor], output_path: str, post_processor: Callable = lambda x: x):
-        """
-        Create a new dataset from predictions, saving them to an HDF5 file.
-        """
-        with h5py.File(output_path, 'w') as h5f:
-            feat_group = h5f.create_group('feature')
-            label_group = h5f.create_group('label')
-            prewar_group = h5f.create_group("prewar")
-            h5f.attrs['is_pred'] = True
-            for i, (sample, pred) in enumerate(zip(base_ds, predictions)):
-                key = f"tile_{i:05d}"
-                feat_group.create_dataset(key, data=sample['feature'].cpu().numpy().squeeze())
-                prewar_group.create_dataset(key, data=sample["prewar"].cpu().numpy().squeeze())
-                label_group.create_dataset(key, data=post_processor(pred.cpu().numpy()))
-                for attr, value in sample['meta'].items():
-                    feat_group[key].attrs[attr] = value
-                    label_group[key].attrs[attr] = value
-
-        return cls(output_path, label_transform=lambda x: x, feat_transform=base_ds.feat_transform, indices=base_ds.indices, is_pred=True)
-
-
-if __name__ == "__main__":
-    ds = PairedImageDataset("train_data_labelling.h5")
-
-    count = 0
-
-    for i in range(1000):
-        try:
-            if ds[i]["label"].max() > 0:
-                count += 1
-        except Exception as exc:
-            print("Failed to show index", i, ":", exc)
-
-    print(f"Count: {count} / {len(ds)}")

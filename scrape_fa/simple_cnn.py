@@ -2,8 +2,24 @@ import torch
 import torch.nn as nn
 
 class SimpleCNN(nn.Module):
-    def __init__(self, n_channels, n_classes=1, kernel_size=3):
+
+    ALLOWED_KWARGS = set("kernel_size")
+
+    def __init__(self, n_channels, n_classes=1, **kwargs):
         super(SimpleCNN, self).__init__()
+        # Validate that only expected keyword arguments are provided.
+        unexpected_keys = set(kwargs) - self.ALLOWED_KWARGS
+        if unexpected_keys:
+            raise TypeError(
+                f"Unexpected keyword argument(s) for {self.__class__.__name__}: "
+                f"{', '.join(sorted(unexpected_keys))}"
+            )
+        self.config = {
+            'n_channels': n_channels,
+            'n_classes': n_classes,
+            'kernel_size': kwargs.pop('kernel_size', 3),
+            **kwargs,
+        }
         self.conv1 = nn.Conv2d(n_channels, 8, kernel_size=kernel_size, padding=kernel_size//2)
         self.relu1 = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(8, 16, kernel_size=kernel_size, padding=kernel_size//2)
@@ -39,11 +55,11 @@ class SimpleCNN(nn.Module):
         checkpoint = torch.load(file_name, map_location=map_location)
 
         model_args = model_args or {}
-        if 'model_args' in checkpoint:
+        if isinstance(checkpoint, dict) and 'model_args' in checkpoint:
             model_args = model_args | checkpoint["model_args"]
 
         model = cls(**model_args)
-        if 'state_dict' in checkpoint:
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
             state_dict = checkpoint["state_dict"]
         else:
             state_dict = checkpoint

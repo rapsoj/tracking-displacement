@@ -113,6 +113,8 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
     """
     threshold = processing_cfg.get('threshold', 0.5)
     min_area = processing_cfg.get('min_area', 20)
+    crop_pixels = processing_cfg.get('crop_pixels', 0)
+
 
     if sample_cfg and sample_cfg.get('enable', True):
         total = len(dataset)
@@ -135,6 +137,12 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                 feats = feats.to(device)
                 outputs = model(feats)
                 probs_np = outputs.cpu().squeeze().numpy()
+
+                if crop_pixels > 0:
+                    probs_np[:crop_pixels, :] = 0
+                    probs_np[-crop_pixels:, :] = 0
+                    probs_np[:, :crop_pixels] = 0
+                    probs_np[:, -crop_pixels:] = 0
 
                 # Threshold
                 mask = (probs_np > threshold)

@@ -45,10 +45,12 @@ def cli(config: str) -> None:
         **params['training']
     )
 
-def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, checkpoint: str | None = None, device: str | None = None) -> None:
+def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, sigma: float = 3.0, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None) -> None:
+
+    model_kwargs = model_kwargs or {}
 
     # Set device to GPU if available
-    if torch.cuda.is_available() and device is None or device == "cuda":
+    if torch.cuda.is_available() and (device is None or device == "cuda"):
         device = torch.device('cuda')
         LOGGER.info(f'Using GPU: {torch.cuda.get_device_name(0)}')
     elif device is None or device == "cpu":
@@ -59,17 +61,19 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     if checkpoint:
         checkpoint = Path(checkpoint)
-        model = SimpleCNN.from_pth(checkpoint, model_args={"n_channels": 2, "n_classes": 1}).to(device)
+        LOGGER.warning("Loading model from checkpoint, ignoring model_kwargs.")
+        model = SimpleCNN.from_pth(checkpoint).to(device)
         hdf5_path_obj = Path(hdf5_path)
 
         save_loc = checkpoint.parent
     else:
-        model = SimpleCNN(2, 1).to(device)
+        model = SimpleCNN(2, 1, **model_kwargs).to(device)
         save_loc = None
 
     # Load and shuffle dataset
-    dataset = PairedImageDataset(hdf5_path)
+    dataset = PairedImageDataset(hdf5_path, sigma=sigma)
     splits = [training_frac, validation_frac, 1-training_frac-validation_frac]
+
     (train_set, val_set, test_set), idcs_list = dataset.create_subsets(splits, shuffle=True, save_loc=save_loc)
     train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate)
     val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
@@ -121,7 +125,10 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
         if val_loss < best_eval:
             model_path = os.path.join(run_dir, 'best_model.pth')
-            torch.save(model.state_dict(), model_path)
+            torch.save({
+                'state_dict': model.state_dict(),
+                'model_args': getattr(model, 'config', {})
+            }, model_path)
             LOGGER.info(f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}.")
             best_eval = val_loss
         LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {total_loss/len(train_loader):.4f} - Validation Loss: {val_loss:.4f}")

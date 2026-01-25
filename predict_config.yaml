@@ -31,3 +31,4 @@ prediction:
     threshold: 1.75
     min_area: 5
     min_distance_m: 3.0
+    crop_pixels: 3  # Set to kernel size

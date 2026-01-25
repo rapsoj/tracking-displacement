@@ -182,13 +182,18 @@ def match_points_per_tile_lonlat(gt_pts: List[Tuple[float, float, Dict]], pred_p
 @click.option("--dist-deg", type=float, default=0.0005, help="Distance threshold in lon/lat degrees for matching")
 @click.option("--per-tile", is_flag=True, default=False, help="Print per-tile stats as well as overall")
 @click.option("--save-report", type=click.Path(), default=None, help="Optional path to save JSON report")
-def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, save_report: Optional[str]):
+@click.option("--global-match", is_flag=True, default=False, help="Force global evaluation of all points, ignoring tile bounds.")
+def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, save_report: Optional[str], global_match: bool):
     """
     Evaluate predictions (points + rectangular bounds) against ground-truth points using lon/lat degrees.
 
-    - Filters GT points to only those within any rectangle in prediction GeoJSON.
-    - Performs per-rectangle matching using Euclidean distance in degrees (lon/lat space).
-    - Computes TP/FP/FN and reports accuracy, precision, recall, F1, FP rate, FN rate.
+    - If bounds exist and global-match is NOT set:
+       - Filters GT points to only those within any rectangle in prediction GeoJSON.
+       - Performs per-rectangle matching using Euclidean distance in degrees (lon/lat space).
+    - If bounds do NOT exist or global-match IS set:
+       - Matches all GT points against all predicted points globally.
+
+    Computes TP/FP/FN and reports accuracy, precision, recall, F1, FP rate, FN rate.
     """
     gt_fc = load_geojson(gt_geojson)
     pr_fc = load_geojson(pred_geojson)
@@ -197,41 +202,58 @@ def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, sav
     pred_points = collect_points(pr_fc)
     bounds_list = collect_bounds(pr_fc)
 
-    if not bounds_list:
-        raise click.ClickException("No rectangular bounds (Polygon features) found in prediction GeoJSON.")
+    # Determine evaluation mode
+    do_global = global_match
+    if not bounds_list and not global_match:
+        click.echo("No rectangular bounds (Polygon features) found in prediction GeoJSON. Falling back to global matching.", err=True)
+        do_global = True
 
-    # Group points by containing bounds
-    gt_by_tile = group_points_by_bounds(gt_points, bounds_list)
-    pr_by_tile = group_points_by_bounds(pred_points, bounds_list)
+    if do_global:
+        # Global matching: Match all GT points against all Pred points directly
+        stats = match_points_per_tile_lonlat(gt_points, pred_points, dist_deg)
+        report = {
+            "mode": "global",
+            "threshold_degrees": dist_deg,
+            "overall": stats.to_dict(),
+            "counts": {
+                "gt_total": len(gt_points),
+                "pred_total": len(pred_points)
+            }
+        }
+    else:
+        # Tile-based matching: Only consider GT points inside prediction tiles
+        gt_by_tile = group_points_by_bounds(gt_points, bounds_list)
+        pr_by_tile = group_points_by_bounds(pred_points, bounds_list)
 
-    overall = TileStats()
-    per_tile_stats: List[Dict] = []
+        overall = TileStats()
+        per_tile_stats: List[Dict] = []
 
-    for i, bounds in enumerate(bounds_list):
-        gt_tile = gt_by_tile.get(i, [])
-        pr_tile = pr_by_tile.get(i, [])
-        stats = match_points_per_tile_lonlat(gt_tile, pr_tile, dist_deg)
-        overall.add(stats)
+        for i, bounds in enumerate(bounds_list):
+            gt_tile = gt_by_tile.get(i, [])
+            pr_tile = pr_by_tile.get(i, [])
+            stats = match_points_per_tile_lonlat(gt_tile, pr_tile, dist_deg)
+            overall.add(stats)
+            if per_tile:
+                per_tile_stats.append({
+                    "tile_index": i,
+                    "bounds": {
+                        "lon_min": bounds.lon_min,
+                        "lon_max": bounds.lon_max,
+                        "lat_min": bounds.lat_min,
+                        "lat_max": bounds.lat_max,
+                    },
+                    "counts": stats.to_dict(),
+                    "num_gt_points": len(gt_tile),
+                    "num_pred_points": len(pr_tile),
+                })
+
+        report = {
+            "mode": "tiled",
+            "threshold_degrees": dist_deg,
+            "overall": overall.to_dict(),
+        }
         if per_tile:
-            per_tile_stats.append({
-                "tile_index": i,
-                "bounds": {
-                    "lon_min": bounds.lon_min,
-                    "lon_max": bounds.lon_max,
-                    "lat_min": bounds.lat_min,
-                    "lat_max": bounds.lat_max,
-                },
-                "counts": stats.to_dict(),
-                "num_gt_points": len(gt_tile),
-                "num_pred_points": len(pr_tile),
-            })
-
-    report = {
-        "threshold_degrees": dist_deg,
-        "overall": overall.to_dict(),
-    }
-    if per_tile:
-        report["per_tile"] = per_tile_stats
+            report["per_tile"] = per_tile_stats
 
     click.echo(json.dumps(report, indent=2))
 
