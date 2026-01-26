@@ -553,9 +553,18 @@ def _crop_src_to_boundaries(src: rasterio.io.DatasetReader, boundaries_path: str
         ds.write(out_image)
     src.close()
     new_src = mem.open()
-    # keep a reference so memfile is not garbage-collected while new_src is used
     new_src._memfile = mem
+
+    orig_close = new_src.close
+
+    def _close():
+        try:
+            orig_close()
+        finally:
+            mem.close()
+
     LOGGER.info(f"Cropped {os.path.basename(new_src.name)} to provided boundaries; new bounds: {new_src.bounds}")
+    new_src.close = _close
     return new_src
 
 
@@ -770,39 +779,58 @@ def coordinate_scanner(
         with open(config, 'r') as f:
             cfg = yaml.safe_load(f)
         search_files = cfg.get('loading', {}).get('files', [])
-        tif_files = [os.path.join(geotiff_dir, f) for f in search_files if os.path.exists(os.path.join(geotiff_dir, f))]
+        tif_files = [
+            os.path.join(geotiff_dir, f)
+            for f in search_files
+            if os.path.exists(os.path.join(geotiff_dir, f))
+        ]
     else:
         tif_files = glob.glob(os.path.join(geotiff_dir, "*.tif"))
 
-    print("Using TIFF files:")
-    for f in tif_files:
-        print(f)
     if not tif_files:
         LOGGER.error(f"No .tif files found in {geotiff_dir}")
         return
 
-    writer = HDF5Writer(hdf5)
-    for tif_path in tif_files:
-        date_target = _extract_date_from_filename(tif_path)
-        if not date_target:
-            LOGGER.warning(f"Skipping {tif_path} (no date found in filename).")
-            continue
-        LOGGER.info(f"Processing {tif_path} with date {date_target}...")
+    with rasterio.Env(GDAL_CACHEMAX=256):
+        for tif_path in tif_files:
+            date_target = _extract_date_from_filename(tif_path)
+            if not date_target:
+                LOGGER.warning(f"Skipping {tif_path} (no date found in filename).")
+                continue
 
-        # pass the exact-name list to the scan function
-        if geojson:
-            scan_grouped_coordinates(
-                tif_path, geojson, writer, quality_thresholds, step, date_target,
-                prewar_path, boundaries_path, complete_list or []
+            base = os.path.splitext(os.path.basename(tif_path))[0]
+            out_h5 = os.path.join(
+                os.path.dirname(hdf5),
+                f"{base}.h5"
             )
-        else:
-            # scan_all_coordinates already processes all grid locations;
-            # if you want to treat listed complete TIFFs differently here you can,
-            # but commonly full-scan means "complete".
-            scan_all_coordinates(tif_path, writer, date_target, step, prewar_path)
 
-    writer.write()
-    LOGGER.info(f"Saved dataset to {hdf5}")
+            LOGGER.info(f"Processing {tif_path} → {out_h5}")
+
+            writer = HDF5Writer(out_h5)
+
+            if geojson:
+                scan_grouped_coordinates(
+                    tif_path,
+                    geojson,
+                    writer,
+                    quality_thresholds,
+                    step,
+                    date_target,
+                    prewar_path,
+                    boundaries_path,
+                    complete_list or []
+                )
+            else:
+                scan_all_coordinates(
+                    tif_path,
+                    writer,
+                    date_target,
+                    step,
+                    prewar_path
+                )
+
+            writer.write()
+            LOGGER.info(f"Saved dataset to {out_h5}")
 
 
 if __name__ == "__main__":
