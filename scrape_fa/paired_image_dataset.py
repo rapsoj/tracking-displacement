@@ -15,7 +15,7 @@ LOGGER = setup_logging("paired-image-ds")
 
 
 class PairedImageDataset(Dataset):
-    def __init__(self, hdf5_path, indices: list[int] | None = None, sigma: float = 3.0):
+    def __init__(self, hdf5_path, indices: list[int] | None = None, sigma: float = 5.0):
         self.hdf5_path = hdf5_path
         self.indices: list | None = indices
         self.sigma = sigma

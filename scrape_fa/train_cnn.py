@@ -67,7 +67,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
         save_loc = checkpoint.parent
     else:
-        model = SimpleCNN(2, 1, **model_kwargs).to(device)
+        model = SimpleCNN(3, 1, **model_kwargs).to(device)
         save_loc = None
 
     # Load and shuffle dataset
@@ -81,7 +81,26 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
 
-    criterion = lambda x, y: ((x - y).abs() * (1 + y)**2).mean() + torch.relu(-x).mean() * 10.0
+    # heatmap + light count supervision, penalising confident false negatives
+    COUNT_LOSS_WEIGHT = 0.1  # adjust 0.05..0.2 as needed
+
+    def criterion(x, y):
+        # x, y : tensors shape (B,1,H,W), y already blurred and normalized by dataset.norm_constant
+        w = (1 + y) ** 1.5
+        l1 = (x - y).abs() * w
+        neg = torch.relu(-x) * (1 + y)
+        fp = torch.relu(x - 0.1) * (1 - y)
+
+        heatmap_loss = l1.mean() + 10.0 * neg.mean() + 0.5 * fp.mean()
+
+        # count loss: use the sum of normalized blurred heatmap as a proxy for count.
+        # sums over spatial dims -> shape (B,)
+        pred_sum = x.sum(dim=(1, 2, 3))
+        true_sum = y.sum(dim=(1, 2, 3))
+        count_loss = torch.nn.functional.l1_loss(pred_sum, true_sum)
+
+        return heatmap_loss + COUNT_LOSS_WEIGHT * count_loss
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Create timestamped run directory
@@ -102,7 +121,9 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         model.train()
         total_loss = 0
         for i, entry in enumerate(train_loader):
-            feats = torch.cat((entry["feature"], entry["prewar"]), axis=1).to(device)
+            # Added a feature channel for current image/prewar difference
+            diff = entry["feature"] - entry["prewar"]
+            feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
             labels = entry["label"].to(device)
 
             optimizer.zero_grad()
@@ -117,8 +138,10 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         val_loss = 0
         with torch.no_grad():
             for idx, entry in enumerate(val_loader):
-                feats = torch.cat((entry["feature"], entry["prewar"]), axis=1).to(device)
+                diff = entry["feature"] - entry["prewar"]
+                feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
                 labels = entry["label"].to(device)
+
                 outputs = model(feats)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
