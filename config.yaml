@@ -2,7 +2,7 @@ geotiff_dir: tiff_files
 boundaries: gaza_boundaries/GazaStrip_MunicipalBoundaries.shp
 prewar_gaza: tiff_files/prewar_gaza.tif
 geojson: tiff_files/snapshot-tents-2025-12-03_121923.geojson
-hdf5: train_data_labelling.h5
+hdf5: train_data_labelling_balanced.h5
 artifact_dir: runs
 loading:
   files:
@@ -38,7 +38,7 @@ training:
   epochs: 10000
   batch_size: 32
   learning_rate: 0.005
-  training_frac: 0.1
-  validation_frac: 0.025
+  training_frac: 0.4
+  validation_frac: 0.1
   model_kwargs:
     kernel_size: 3

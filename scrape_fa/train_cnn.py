@@ -164,4 +164,4 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     LOGGER.info("Test overlays and comparison figures saved.")
 
 if __name__ == '__main__':
-    train()
+    cli()
