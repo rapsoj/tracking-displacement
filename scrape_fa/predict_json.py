@@ -2,6 +2,10 @@ import math
 import yaml
 import click
 import torch
+import rasterio
+from rasterio.transform import from_bounds
+from rasterio.merge import merge
+from glob import glob
 import random
 import numpy as np
 import json
@@ -18,6 +22,74 @@ from scrape_fa.util.logging_config import setup_logging
 LOGGER = setup_logging("predict_json")
 
 EARTH_RADIUS_M = 6371000.0
+
+def save_prediction_tiff(probs, bounds, out_path):
+    """
+    Save a single-band GeoTIFF from a probability array.
+    probs: 2D numpy array (H, W)
+    bounds: dict with lat_min, lat_max, lon_min, lon_max (may be in any order)
+    """
+    height, width = probs.shape
+
+    # Defensive: coerce to floats and make sure min/max ordering is correct
+    lat_min = float(bounds.get("lat_min"))
+    lat_max = float(bounds.get("lat_max"))
+    lon_min = float(bounds.get("lon_min"))
+    lon_max = float(bounds.get("lon_max"))
+
+    left = min(lon_min, lon_max)
+    right = max(lon_min, lon_max)
+    bottom = min(lat_min, lat_max)
+    top = max(lat_min, lat_max)
+
+    transform = from_bounds(left, bottom, right, top, width, height)
+
+    with rasterio.open(
+        str(out_path),
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=transform,
+        compress="lzw",
+        nodata=np.nan
+    ) as dst:
+        dst.write(probs.astype(np.float32), 1)
+
+
+def merge_prediction_tiffs(tiff_dir, out_path, dst_crs="EPSG:4326"):
+    """
+    Merge all *_pred.tif files in tiff_dir into a single georeferenced GeoTIFF.
+    """
+    tiff_paths = sorted(glob(str(Path(tiff_dir) / "*_pred.tif")))
+    if not tiff_paths:
+        LOGGER.warning("No prediction TIFFs found to merge.")
+        return
+
+    src_files = [rasterio.open(p) for p in tiff_paths]
+    mosaic, out_trans = merge(src_files)  # mosaic shape: (bands, H, W)
+
+    out_meta = src_files[0].meta.copy()
+    out_meta.update({
+        "driver": "GTiff",
+        "height": mosaic.shape[1],
+        "width": mosaic.shape[2],
+        "transform": out_trans,
+        "crs": dst_crs,
+        "count": mosaic.shape[0],
+        "dtype": mosaic.dtype
+    })
+
+    with rasterio.open(out_path, "w", **out_meta) as dest:
+        dest.write(mosaic)
+
+    for src in src_files:
+        src.close()
+    LOGGER.info(f"Mosaic written to {out_path}")
+
 
 def haversine_m(lat1, lon1, lat2, lon2):
     """
@@ -106,7 +178,7 @@ def interpolate_centroid(centroid, bounds, shape):
     lon = lon_min + (lon_max - lon_min) * (x / width)
     return (lat, lon)
 
-def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
+def predict_json(dataset, model, device, processing_cfg, sample_cfg=None, validation_tifs=False):
     """
     Run predictions and extract centroids of labeled regions above min_area for each tile.
     (No intra-tile spatial deduplication here; deduplication is performed globally after prediction.)
@@ -133,16 +205,28 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
         for i, entry in enumerate(subset):
             try:
                 LOGGER.info(f"Predicting image {i+1}/{len(subset)}")
-                feats = torch.cat((entry["feature"], entry["prewar"]))
-                feats = feats.to(device)
+                diff = entry["feature"] - entry["prewar"]
+                feats = torch.cat((entry["feature"], entry["prewar"], diff), dim=0)
+                feats = feats.unsqueeze(0).to(device)  # add batch dim
                 outputs = model(feats)
                 probs_np = outputs.cpu().squeeze().numpy()
+
+                bounds = json.loads(entry["meta"])
 
                 if crop_pixels > 0:
                     probs_np[:crop_pixels, :] = 0
                     probs_np[-crop_pixels:, :] = 0
                     probs_np[:, :crop_pixels] = 0
                     probs_np[:, -crop_pixels:] = 0
+
+                if validation_tifs:
+                    tiff_dir = Path(processing_cfg.get("tiff_output_dir", "prediction_tiffs"))
+                    tiff_dir.mkdir(parents=True, exist_ok=True)
+
+                    origin = bounds.get("origin_image", f"tile_{i}")
+                    tiff_path = tiff_dir / f"{Path(origin).stem}_{i}_pred.tif"
+
+                    save_prediction_tiff(probs_np, bounds, tiff_path)
 
                 # Threshold
                 mask = (probs_np > threshold)
@@ -151,7 +235,6 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None):
                 # Filter by min_area and extract centroids
                 coords = []
                 shape = mask.shape
-                bounds = json.loads(entry['meta'])
                 for region_id in range(1, num_features + 1):
                     region_mask = (labeled == region_id)
                     area = np.sum(region_mask)
@@ -269,8 +352,9 @@ def cli(config) -> None:
     ds = PairedImageDataset(pred_cfg['input'])
     model = SimpleCNN.from_pth(
         pred_cfg['model'],
-        model_args={"n_channels": 2, "n_classes": 1}
+        model_args={"n_channels": 3, "n_classes": 1}
     )
+    validation_tifs = bool(pred_cfg.get("validation_tifs", False))
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -280,7 +364,9 @@ def cli(config) -> None:
     out_path = pred_cfg.get('output', 'predictions.geojson')
 
     # run predictions (per-tile centroids, no intra-tile dedupe)
-    results = predict_json(ds, model, device, processing_cfg, sample_cfg)
+    results = predict_json(
+        ds, model, device, processing_cfg, sample_cfg, validation_tifs=validation_tifs
+    )
     tent_count_pre = sum(len(res["coordinates"]) for res in results)
     LOGGER.info(f"Total number of tents (pre-merge): {tent_count_pre}")
 
@@ -291,6 +377,11 @@ def cli(config) -> None:
 
     # Save only the cleaned/deduplicated points (no raw points, no deduplicated flag)
     save_geojson(results, out_path, save_bounds=False, deduplicated_points=merged_coords)
+
+    if validation_tifs:
+        tiff_dir = Path(processing_cfg.get("tiff_output_dir", "prediction_tiffs"))
+        mosaic_out = Path(pred_cfg.get("tiff_mosaic_output", "predictions_mosaic.tif"))
+        merge_prediction_tiffs(tiff_dir, str(mosaic_out))
 
 if __name__ == '__main__':
     cli()

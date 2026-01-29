@@ -12,8 +12,9 @@ def prediction(dataset, model, target_dir, device):
     with torch.no_grad():
         output_combined = []
         for entry in dataset:
-            feats = torch.stack((entry["feature"], entry["prewar"]))
-            feats = feats.to(device)
+            diff = entry["feature"] - entry["prewar"]
+            feats = torch.cat((entry["feature"], entry["prewar"], diff), dim=0)
+            feats = feats.unsqueeze(0).to(device)  # [1, 3, H, W]
             outputs = model(feats)
             output_combined.append(outputs.cpu().squeeze())
 
@@ -31,7 +32,10 @@ def cli(config) -> None:
             raise click.ClickException(f"Missing required config key: {k}")
 
     ds = PairedImageDataset(params['prediction']['input'])
-    model = SimpleCNN.from_pth(params['prediction']['model'], model_args={"n_channels": 1, "n_classes": 1})
+    model = SimpleCNN.from_pth(
+        params['prediction']['model'],
+        model_args={"n_channels": 3, "n_classes": 1}
+    )
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 

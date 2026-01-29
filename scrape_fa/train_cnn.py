@@ -16,6 +16,17 @@ from scrape_fa.predict import prediction
 
 LOGGER = setup_logging("train-cnn")
 
+class CachedDataset(torch.utils.data.Dataset):
+    def __init__(self, base_ds):
+        self.data = [base_ds[i] for i in range(len(base_ds))]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, i):
+        return self.data[i]
+
+
 def custom_collate(batch):
     # Initialize an empty dictionary to store concatenated results
     collated_dict = {}
@@ -45,7 +56,7 @@ def cli(config: str) -> None:
         **params['training']
     )
 
-def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, sigma: float = 3.0, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None) -> None:
+def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, sigma: float = 3.0, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None, memory: bool = False) -> None:
 
     model_kwargs = model_kwargs or {}
 
@@ -75,31 +86,39 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     splits = [training_frac, validation_frac, 1-training_frac-validation_frac]
 
     (train_set, val_set, test_set), idcs_list = dataset.create_subsets(splits, shuffle=True, save_loc=save_loc)
-    train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate)
+
+    if memory:
+        LOGGER.info("Caching training dataset in RAM...")
+        train_set = CachedDataset(train_set)
+        LOGGER.info(f"Cached {len(train_set)} training samples.")
+
+    train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate, num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
     test_loader = DataLoader(test_set, batch_size=batch_size, collate_fn=custom_collate)
 
     LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
 
     # heatmap + light count supervision, penalising confident false negatives
-    COUNT_LOSS_WEIGHT = 0.1  # adjust 0.05..0.2 as needed
+    # COUNT_LOSS_WEIGHT = 0.1  # adjust 0.05..0.2 as needed
 
+    # def criterion(x, y):
+    #     # x, y : tensors shape (B,1,H,W), y already blurred and normalized by dataset.norm_constant
+    #     w = (1 + y) ** 1.5
+    #     l1 = (x - y).abs() * w
+    #     neg = torch.relu(-x) * (1 + y)
+    #     fp = torch.relu(x - 0.1) * (1 - y)
+
+    #     heatmap_loss = l1.mean() + 10.0 * neg.mean() + 0.5 * fp.mean()
+
+    #     # count loss: use the sum of normalized blurred heatmap as a proxy for count.
+    #     # sums over spatial dims -> shape (B,)
+    #     pred_sum = x.sum(dim=(1, 2, 3))
+    #     true_sum = y.sum(dim=(1, 2, 3))
+    #     count_loss = torch.nn.functional.l1_loss(pred_sum, true_sum)
+
+    #     return heatmap_loss + COUNT_LOSS_WEIGHT * count_loss
     def criterion(x, y):
-        # x, y : tensors shape (B,1,H,W), y already blurred and normalized by dataset.norm_constant
-        w = (1 + y) ** 1.5
-        l1 = (x - y).abs() * w
-        neg = torch.relu(-x) * (1 + y)
-        fp = torch.relu(x - 0.1) * (1 - y)
-
-        heatmap_loss = l1.mean() + 10.0 * neg.mean() + 0.5 * fp.mean()
-
-        # count loss: use the sum of normalized blurred heatmap as a proxy for count.
-        # sums over spatial dims -> shape (B,)
-        pred_sum = x.sum(dim=(1, 2, 3))
-        true_sum = y.sum(dim=(1, 2, 3))
-        count_loss = torch.nn.functional.l1_loss(pred_sum, true_sum)
-
-        return heatmap_loss + COUNT_LOSS_WEIGHT * count_loss
+        return torch.nn.functional.mse_loss(x, y)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -119,33 +138,48 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     for epoch in range(epochs):
         model.train()
-        total_loss = 0
+        train_loss = 0.0
+        n_train = 0
+        
         for i, entry in enumerate(train_loader):
-            # Added a feature channel for current image/prewar difference
             diff = entry["feature"] - entry["prewar"]
             feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
             labels = entry["label"].to(device)
-
+        
             optimizer.zero_grad()
             outputs = model(feats)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
+        
+            bsz = labels.size(0)
+            train_loss += loss.item() * bsz
+            n_train += bsz
             print(f"Epoch {epoch}: Completed step {i+1} / {len(train_loader)}", end="\r")
+            
+        # normalize once per epoch
+        train_loss /= n_train
+            
         # Validation loss
         model.eval()
-        val_loss = 0
+        val_loss = 0.0
+        n_val = 0
+        
         with torch.no_grad():
-            for idx, entry in enumerate(val_loader):
+            for entry in val_loader:
                 diff = entry["feature"] - entry["prewar"]
                 feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
                 labels = entry["label"].to(device)
-
+        
                 outputs = model(feats)
                 loss = criterion(outputs, labels)
-                val_loss += loss.item()
-        val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
+        
+                bsz = labels.size(0)
+                val_loss += loss.item() * bsz
+                n_val += bsz
+        
+        val_loss = val_loss / n_val if n_val > 0 else 0.0
+
         if val_loss < best_eval:
             model_path = os.path.join(run_dir, 'best_model.pth')
             torch.save({
@@ -154,7 +188,7 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
             }, model_path)
             LOGGER.info(f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}.")
             best_eval = val_loss
-        LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {total_loss/len(train_loader):.4f} - Validation Loss: {val_loss:.4f}")
+        LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f} - Validation Loss: {val_loss:.4f}")
 
     # Create timestamped run directory
     # Save trained model
