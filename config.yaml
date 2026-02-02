@@ -6,18 +6,18 @@ hdf5: train_data_labelling_balanced.h5
 artifact_dir: runs
 loading:
   files:
-    # - deir_el_balah_20250315_121122_ssc10_u0002_visual_clip_file_format.tif
-    # - deir_el_balah_20250319_121507_ssc8_u0001_visual_clip_file_format.tif
-    # - netzarim_corridor_gaza_city_beit_lahiya_20250331_121449_ssc10_u0001_visual_clip.tif
-    # - deir_el_balah_and_nuseirat_20250326_054752_ssc2_u0002_visual_clip_file_format.tif
-    # - khan_yunis_20250315_065509_ssc13_u0001_visual_file_format.tif
-    # - khan_yunis_al_mawasi_20250214_121114_ssc6_u0002_visual_clip.tif
-    # - khan_yunis_20241005_062045_ssc2_u0001_visual_clip.tif
-    # - deir_el_balah_20250330_121424_ssc7_u0001_visual_clip.tif
-    # - nuseirat_20250325_055502_ssc4_u0002_visual_clip_file_format.tif
-    # - khan_yunis_20250316_122205_ssc6_u0001_visual_clip_file_format.tif
-    # - khan_yunis_20250318_065316_ssc1_u0001_visual_clip_file_format.tif
-    # - al_mawasi_khan_yunis_20241002_115718_ssc7_u0001_visual.tif
+    - deir_el_balah_20250315_121122_ssc10_u0002_visual_clip_file_format.tif
+    - deir_el_balah_20250319_121507_ssc8_u0001_visual_clip_file_format.tif
+    - netzarim_corridor_gaza_city_beit_lahiya_20250331_121449_ssc10_u0001_visual_clip.tif
+    - deir_el_balah_and_nuseirat_20250326_054752_ssc2_u0002_visual_clip_file_format.tif
+    - khan_yunis_20250315_065509_ssc13_u0001_visual_file_format.tif
+    - khan_yunis_al_mawasi_20250214_121114_ssc6_u0002_visual_clip.tif
+    - khan_yunis_20241005_062045_ssc2_u0001_visual_clip.tif
+    - deir_el_balah_20250330_121424_ssc7_u0001_visual_clip.tif
+    - nuseirat_20250325_055502_ssc4_u0002_visual_clip_file_format.tif
+    - khan_yunis_20250316_122205_ssc6_u0001_visual_clip_file_format.tif
+    - khan_yunis_20250318_065316_ssc1_u0001_visual_clip_file_format.tif
+    - al_mawasi_khan_yunis_20241002_115718_ssc7_u0001_visual.tif
     # - gaza_city_and_jabalia_20250319_121502_ssc8_u0001_visual_clip_file_format.tif # TEST SET
 processing:
   step: 0.0005

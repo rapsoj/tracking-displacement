@@ -23,6 +23,57 @@ LOGGER = setup_logging("predict_json")
 
 EARTH_RADIUS_M = 6371000.0
 
+def filter_points_without_agreement(results, min_distance_m):
+    """
+    Remove points that do not have at least one other point within
+    min_distance_m, using the same clustering definition as deduplication.
+    """
+    flat = []  # (lat, lon, tile_idx, pt_idx)
+    for t_idx, tile in enumerate(results):
+        for p_idx, (lat, lon) in enumerate(tile.get("coordinates", [])):
+            flat.append((lat, lon, t_idx, p_idx))
+
+    n = len(flat)
+    if n == 0:
+        return results
+
+    uf = UnionFind(n)
+
+    for i in range(n):
+        lat_i, lon_i, _, _ = flat[i]
+        for j in range(i + 1, n):
+            lat_j, lon_j, _, _ = flat[j]
+            if haversine_m(lat_i, lon_i, lat_j, lon_j) <= min_distance_m:
+                uf.union(i, j)
+
+    clusters = {}
+    for idx in range(n):
+        root = uf.find(idx)
+        clusters.setdefault(root, []).append(idx)
+
+    # indices that belong to clusters of size >= 2
+    keep_indices = set(
+        idx for members in clusters.values() if len(members) >= 2 for idx in members
+    )
+
+    filtered = []
+    for t_idx, tile in enumerate(results):
+        new_coords = []
+        for p_idx, coord in enumerate(tile.get("coordinates", [])):
+            flat_idx = next(
+                i for i, (_, _, ti, pi) in enumerate(flat)
+                if ti == t_idx and pi == p_idx
+            )
+            if flat_idx in keep_indices:
+                new_coords.append(coord)
+        filtered.append({
+            "bounds": tile.get("bounds"),
+            "coordinates": new_coords
+        })
+
+    return filtered
+
+
 def save_prediction_tiff(probs, bounds, out_path):
     """
     Save a single-band GeoTIFF from a probability array.
@@ -370,8 +421,22 @@ def cli(config) -> None:
     tent_count_pre = sum(len(res["coordinates"]) for res in results)
     LOGGER.info(f"Total number of tents (pre-merge): {tent_count_pre}")
 
-    # global deduplication in meters
     min_distance_m = processing_cfg.get('min_distance_m', 2.0)
+
+    # Only keep points with agreement between overlaps
+    agreement = bool(processing_cfg.get("agreement", False))
+
+    if agreement:
+        results = filter_points_without_agreement(
+            results,
+            min_distance_m=min_distance_m
+        )
+        LOGGER.info(
+            f"Total number of tents after agreement filter: "
+            f"{sum(len(r['coordinates']) for r in results)}"
+        )
+
+    # global deduplication in meters
     merged_coords = merge_close_points_global(results, min_distance_m=min_distance_m)
     LOGGER.info(f"Total number of tents (post-merge): {len(merged_coords)}")
 

@@ -23,12 +23,13 @@ prediction:
   model: runs/20260129_084500/best_model.pth
   # Optional sampling configuration
   sample:
-    enable: true        # set to false to run on all tiles
+    enable: false        # set to false to run on all tiles
     size: 200           # number of random tiles to predict
     seed: 5            # optional random seed for reproducibility
   processing:
-    threshold: 0.2
+    agreement: false
+    threshold: 0.1
     min_area: 5
     min_distance_m: 3.0
     crop_pixels: 16  # Set to radius of total receptive field
-  validation_tifs: true
+  validation_tifs: false # ideally set to false if sampling is false

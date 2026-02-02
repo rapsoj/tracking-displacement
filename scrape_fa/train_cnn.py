@@ -98,25 +98,6 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
 
-    # heatmap + light count supervision, penalising confident false negatives
-    # COUNT_LOSS_WEIGHT = 0.1  # adjust 0.05..0.2 as needed
-
-    # def criterion(x, y):
-    #     # x, y : tensors shape (B,1,H,W), y already blurred and normalized by dataset.norm_constant
-    #     w = (1 + y) ** 1.5
-    #     l1 = (x - y).abs() * w
-    #     neg = torch.relu(-x) * (1 + y)
-    #     fp = torch.relu(x - 0.1) * (1 - y)
-
-    #     heatmap_loss = l1.mean() + 10.0 * neg.mean() + 0.5 * fp.mean()
-
-    #     # count loss: use the sum of normalized blurred heatmap as a proxy for count.
-    #     # sums over spatial dims -> shape (B,)
-    #     pred_sum = x.sum(dim=(1, 2, 3))
-    #     true_sum = y.sum(dim=(1, 2, 3))
-    #     count_loss = torch.nn.functional.l1_loss(pred_sum, true_sum)
-
-    #     return heatmap_loss + COUNT_LOSS_WEIGHT * count_loss
     def criterion(x, y):
         return torch.nn.functional.mse_loss(x, y)
 
