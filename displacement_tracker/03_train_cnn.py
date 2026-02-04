@@ -1,6 +1,5 @@
 from __future__ import annotations
 from pathlib import Path
-import shutil
 
 import click
 import torch
@@ -9,10 +8,9 @@ import torch.optim as optim
 import os
 import yaml
 import datetime
-from scrape_fa.paired_image_dataset import PairedImageDataset
-from scrape_fa.simple_cnn import SimpleCNN
-from scrape_fa.util.logging_config import setup_logging
-from scrape_fa.predict import prediction
+from displacement_tracker.paired_image_dataset import PairedImageDataset
+from displacement_tracker.simple_cnn import SimpleCNN
+from displacement_tracker.util.logging_config import setup_logging
 
 LOGGER = setup_logging("train-cnn")
 
@@ -170,13 +168,6 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
             LOGGER.info(f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}.")
             best_eval = val_loss
         LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f} - Validation Loss: {val_loss:.4f}")
-
-    # Create timestamped run directory
-    # Save trained model
-    # Run through test set and save overlays
-    model.eval()
-    prediction(test_set, model, os.path.join(run_dir, "test_predictions.h5"), device)
-    LOGGER.info("Test overlays and comparison figures saved.")
 
 if __name__ == '__main__':
     cli()

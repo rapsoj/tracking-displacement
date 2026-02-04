@@ -3,8 +3,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
-from scrape_fa.paired_image_dataset import PairedImageDataset
-from scrape_fa.simple_cnn import SimpleCNN
+from displacement_tracker.paired_image_dataset import PairedImageDataset
+from displacement_tracker.simple_cnn import SimpleCNN
 
 plt.ion()  # interactive mode
 

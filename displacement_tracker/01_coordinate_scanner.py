@@ -21,7 +21,7 @@ from rasterio.transform import xy
 from rasterio import mask
 from rasterio.io import MemoryFile
 
-from scrape_fa.util.logging_config import setup_logging
+from displacement_tracker.util.logging_config import setup_logging
 
 LOGGER = setup_logging('coordinate_scanner')
 

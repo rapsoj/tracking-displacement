@@ -5,7 +5,7 @@ from googleapiclient.http import MediaIoBaseDownload
 import click
 import yaml
 
-from .util.env_loader import require_env_file
+from displacement_tracker.util.env_loader import require_env_file
 
 def download_tif_files_from_public_folder(search_string: str, download_dir='.'):
     """

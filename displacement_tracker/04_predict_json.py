@@ -6,18 +6,14 @@ import rasterio
 from rasterio.transform import from_bounds
 from rasterio.merge import merge
 from glob import glob
-import random
 import numpy as np
 import json
 from pathlib import Path
 from scipy.ndimage import label, center_of_mass
-#import matplotlib
-#matplotlib.use("agg")
-#import matplotlib.pyplot as plt
 
-from scrape_fa.paired_image_dataset import PairedImageDataset
-from scrape_fa.simple_cnn import SimpleCNN
-from scrape_fa.util.logging_config import setup_logging
+from displacement_tracker.paired_image_dataset import PairedImageDataset
+from displacement_tracker.simple_cnn import SimpleCNN
+from displacement_tracker.util.logging_config import setup_logging
 
 LOGGER = setup_logging("predict_json")
 

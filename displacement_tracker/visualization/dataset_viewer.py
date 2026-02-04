@@ -138,7 +138,7 @@ class DatasetViewer:
         plt.show()
 
 if __name__ == "__main__":
-    from scrape_fa.paired_image_dataset import PairedImageDataset
+    from displacement_tracker.paired_image_dataset import PairedImageDataset
     ds = PairedImageDataset("test_data_labelling.h5")
 
     n_non_null, counts = np.unique(np.nonzero(ds.label_dataset)[0], return_counts=True)

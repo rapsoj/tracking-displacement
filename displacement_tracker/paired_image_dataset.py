@@ -9,7 +9,7 @@ import numpy as np
 import h5py
 from scipy.ndimage import gaussian_filter
 
-from scrape_fa.util.logging_config import setup_logging
+from displacement_tracker.util.logging_config import setup_logging
 
 LOGGER = setup_logging("paired-image-ds")
 
