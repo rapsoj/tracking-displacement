@@ -14,7 +14,8 @@ from scipy.ndimage import label, center_of_mass
 from displacement_tracker.paired_image_dataset import PairedImageDataset
 from displacement_tracker.simple_cnn import SimpleCNN
 from displacement_tracker.util.logging_config import setup_logging
-from displacement_tracker.util.distance import haversine_m, interpolate_centroid
+from displacement_tracker.util.distance import interpolate_centroid
+from displacement_tracker.util.deduplication import merge_close_points_global
 
 LOGGER = setup_logging("predict_json")
 
@@ -87,57 +88,8 @@ def merge_prediction_tiffs(tiff_dir, out_path, dst_crs="EPSG:4326"):
     LOGGER.info(f"Mosaic written to {out_path}")
 
 
-def merge_close_points_global(results, min_distance_m=2.0, agreement: int = 1):
-    """
-    Merge points across all tiles that are closer than min_distance_m.
-    Returns a flat list of merged (lat, lon) centroids.
-    """
-    # Flatten all points
-    flat = []  # (lat, lon, tile_idx, pt_idx)
-    for t_idx, tile in enumerate(results):
-        for p_idx, (lat, lon) in enumerate(tile.get('coordinates', [])):
-            flat.append((lat, lon, t_idx, p_idx))
-    n = len(flat)
-    if n == 0:
-        return []
 
-    uf = UnionFind(n)
-
-    # O(n^2) pairwise merge; OK for moderate n (few thousands).
-    for i in range(n):
-        lat_i, lon_i, _, _ = flat[i]
-        for j in range(i+1, n):
-            lat_j, lon_j, _, _ = flat[j]
-            if haversine_m(lat_i, lon_i, lat_j, lon_j) <= min_distance_m:
-                uf.union(i, j)
-
-    # collect clusters
-    clusters = {}
-    for idx in range(n):
-        root = uf.find(idx)
-        clusters.setdefault(root, []).append(idx)
-
-    # compute centroid for each cluster (simple average of lat/lon)
-    merged = []
-    for members in clusters.values():
-        sum_lat = 0.0
-        sum_lon = 0.0
-
-        # Just skip clusters that don't meet agreement threshold, if specified.
-        # Avoids entirely new functions for this simple filter.
-        if len(members) < agreement:
-            continue
-
-        for m in members:
-            lat, lon, _, _ = flat[m]
-            sum_lat += lat
-            sum_lon += lon
-        cnt = len(members)
-        merged.append((sum_lat / cnt, sum_lon / cnt))
-    return merged
-
-
-def predict_json(dataset, model, device, processing_cfg, sample_cfg=None, validation_tifs=False):
+def predict(dataset, model, device, processing_cfg, sample_cfg=None, validation_tifs=False):
     """
     Run predictions and extract centroids of labeled regions above min_area for each tile.
     (No intra-tile spatial deduplication here; deduplication is performed globally after prediction.)
@@ -214,26 +166,8 @@ def predict_json(dataset, model, device, processing_cfg, sample_cfg=None, valida
                 LOGGER.warning(f"Prediction error: {exc}")
     return results
 
-def bounds_to_polygon(bounds):
-    """
-    Convert bounds dict to a GeoJSON polygon (list of [lon, lat] pairs).
-    """
-    lat_min = bounds.get('lat_min')
-    lat_max = bounds.get('lat_max')
-    lon_min = bounds.get('lon_min')
-    lon_max = bounds.get('lon_max')
-    if None in (lat_min, lat_max, lon_min, lon_max):
-        raise ValueError("Missing bounds in metadata")
-    # Polygon corners: lower left, lower right, upper right, upper left, close
-    return [
-        [lon_min, lat_min],
-        [lon_max, lat_min],
-        [lon_max, lat_max],
-        [lon_min, lat_max],
-        [lon_min, lat_min]
-    ]
 
-def save_geojson(results, out_path, save_bounds: bool = True, deduplicated_points=None):
+def save_geojson(points, out_path):
     """
     Save results to a GeoJSON file.
     If deduplicated_points is provided, ONLY write those cleaned points (no original raw points,
@@ -241,54 +175,18 @@ def save_geojson(results, out_path, save_bounds: bool = True, deduplicated_point
     """
     features = []
 
-    if deduplicated_points:
-        # Write only cleaned/deduplicated points (one feature per merged centroid)
-        for lat, lon in deduplicated_points:
-            features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [lon, lat]
-                },
-                "properties": {
-                    "name": "tents"
-                }
-            })
-    else:
-        # legacy behaviour: write polygons and per-tile points
-        for tile_idx, tile in enumerate(results):
-            coords = tile.get('coordinates', [])
-            bounds = tile.get('bounds')
-            if bounds and save_bounds:
-                try:
-                    polygon = bounds_to_polygon(bounds)
-                    features.append({
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "Polygon",
-                            "coordinates": [polygon]
-                        },
-                        "properties": {
-                            "name": "region_processed",
-                            "source": bounds.get("origin_image")
-                        }
-                    })
-                except Exception as exc:
-                    LOGGER.warning(f"Polygon conversion error: {exc}")
-            for pt_idx, (lat, lon) in enumerate(coords):
-                features.append({
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [lon, lat]
-                    },
-                    "properties": {
-                        "date_start": (tile.get('bounds') or {}).get('origin_date'),
-                        "name": "tents",
-                        "date_end": (tile.get('bounds') or {}).get('origin_date'),
-                        "source": (tile.get('bounds') or {}).get("origin_image")
-                    }
-                })
+    # Write only cleaned/deduplicated points (one feature per merged centroid)
+    for lat, lon in points:
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat]
+            },
+            "properties": {
+                "name": "tents"
+            }
+        })
 
     geojson = {
         "type": "FeatureCollection",
@@ -323,11 +221,11 @@ def cli(config) -> None:
     out_path = pred_cfg.get('output', 'predictions.geojson')
 
     # run predictions (per-tile centroids, no intra-tile dedupe)
-    results = predict_json(
+    results = predict(
         ds, model, device, processing_cfg, sample_cfg, validation_tifs=validation_tifs
     )
-    tent_count_pre = sum(len(res["coordinates"]) for res in results)
-    LOGGER.info(f"Total number of tents (pre-merge): {tent_count_pre}")
+    flat_results = [pt for res in results for pt in res['coordinates']]
+    LOGGER.info(f"Total number of tents (pre-merge): {len(flat_results)}")
 
     min_distance_m = processing_cfg.get('min_distance_m', 2.0)
 
@@ -337,11 +235,15 @@ def cli(config) -> None:
         agreement = 2 if agreement else 1
 
     # global deduplication in meters
-    merged_coords = merge_close_points_global(results, min_distance_m=min_distance_m, agreement=agreement)
+    merged_coords = merge_close_points_global(
+        flat_results,
+        min_distance_m=min_distance_m,
+        agreement=agreement
+    )
     LOGGER.info(f"Total number of tents (post-merge): {len(merged_coords)}")
 
     # Save only the cleaned/deduplicated points (no raw points, no deduplicated flag)
-    save_geojson(results, out_path, save_bounds=False, deduplicated_points=merged_coords)
+    save_geojson(merged_coords, out_path)
 
     if validation_tifs:
         tiff_dir = Path(processing_cfg.get("tiff_output_dir", "prediction_tiffs"))
