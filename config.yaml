@@ -32,6 +32,10 @@ processing:
     - khan_yunis_20250315_065509_ssc13_u0001_visual_file_format.tif
     - gaza_city_and_jabalia_20250319_121502_ssc8_u0001_visual_clip_file_format.tif
     - deir_el_balah_20250330_121424_ssc7_u0001_visual_clip.tif
+rebalancing:
+  inp: "train_data_labelling.h5"
+  out: "train_data_labelling_balanced.h5"
+  rng_seed: 42
 training:
   checkpoint: null # runs/20251215_104659/best_model.pth # runs/20251215_033219/best_model.pth
   device: cuda
