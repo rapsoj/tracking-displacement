@@ -97,6 +97,8 @@ def predict(dataset, model, device, processing_cfg, sample_cfg=None, validation_
     threshold = processing_cfg.get('threshold', 0.5)
     min_area = processing_cfg.get('min_area', 20)
     crop_pixels = processing_cfg.get('crop_pixels', 0)
+    agreement = processing_cfg.get("agreement", False)
+    min_distance_m = processing_cfg.get('min_distance_m', 2.0)
 
 
     if sample_cfg and sample_cfg.get('enable', True):
@@ -164,7 +166,22 @@ def predict(dataset, model, device, processing_cfg, sample_cfg=None, validation_
                 LOGGER.info(f"Found {len(coords)} tents (pre-merge).")
             except Exception as exc:
                 LOGGER.warning(f"Prediction error: {exc}")
-    return results
+
+    flat_results = [pt for res in results for pt in res['coordinates']]
+    LOGGER.info(f"Total number of tents (pre-merge): {len(flat_results)}")
+
+    # Only keep points with agreement between overlaps
+    if isinstance(agreement, bool):  # convert to int, False -> 1 point agreement, True -> 2 point agreement
+        agreement = 2 if agreement else 1
+
+    # global deduplication in meters
+    merged_coords = merge_close_points_global(
+        flat_results,
+        min_distance_m=min_distance_m,
+        agreement=agreement
+    )
+    LOGGER.info(f"Total number of tents (post-merge): {len(merged_coords)}")
+    return merged_coords
 
 
 def save_geojson(points, out_path):
@@ -206,42 +223,28 @@ def cli(config) -> None:
         raise click.ClickException("Missing required config key: prediction")
 
     pred_cfg = params['prediction']
-    ds = PairedImageDataset(pred_cfg['input'])
+    sample_cfg = pred_cfg.get('sample', {})
+    out_path = pred_cfg.get('output', 'predictions.geojson')
+    processing_cfg = pred_cfg.get('processing', {})
+    device = pred_cfg.get('device', None)
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+    ds = PairedImageDataset(pred_cfg["input"])
     model = SimpleCNN.from_pth(
         pred_cfg['model'],
         model_args={"n_channels": 3, "n_classes": 1}
     )
     validation_tifs = pred_cfg.get("validation_tifs", False)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(device)
     model.to(device)
-
-    sample_cfg = pred_cfg.get('sample', {})
-    processing_cfg = pred_cfg.get('processing', {})
-    out_path = pred_cfg.get('output', 'predictions.geojson')
 
     # run predictions (per-tile centroids, no intra-tile dedupe)
     results = predict(
         ds, model, device, processing_cfg, sample_cfg, validation_tifs=validation_tifs
     )
-    flat_results = [pt for res in results for pt in res['coordinates']]
-    LOGGER.info(f"Total number of tents (pre-merge): {len(flat_results)}")
-
-    min_distance_m = processing_cfg.get('min_distance_m', 2.0)
-
-    # Only keep points with agreement between overlaps
-    agreement = processing_cfg.get("agreement", False)
-    if isinstance(agreement, bool):  # convert to int, False -> 1 point agreement, True -> 2 point agreement
-        agreement = 2 if agreement else 1
-
-    # global deduplication in meters
-    merged_coords = merge_close_points_global(
-        flat_results,
-        min_distance_m=min_distance_m,
-        agreement=agreement
-    )
-    LOGGER.info(f"Total number of tents (post-merge): {len(merged_coords)}")
-
     # Save only the cleaned/deduplicated points (no raw points, no deduplicated flag)
     save_geojson(merged_coords, out_path)
 
