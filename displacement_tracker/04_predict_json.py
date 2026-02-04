@@ -14,60 +14,9 @@ from scipy.ndimage import label, center_of_mass
 from displacement_tracker.paired_image_dataset import PairedImageDataset
 from displacement_tracker.simple_cnn import SimpleCNN
 from displacement_tracker.util.logging_config import setup_logging
+from displacement_tracker.util.distance import haversine_m, interpolate_centroid
 
 LOGGER = setup_logging("predict_json")
-
-EARTH_RADIUS_M = 6371000.0
-
-def filter_points_without_agreement(results, min_distance_m):
-    """
-    Remove points that do not have at least one other point within
-    min_distance_m, using the same clustering definition as deduplication.
-    """
-    flat = []  # (lat, lon, tile_idx, pt_idx)
-    for t_idx, tile in enumerate(results):
-        for p_idx, (lat, lon) in enumerate(tile.get("coordinates", [])):
-            flat.append((lat, lon, t_idx, p_idx))
-
-    n = len(flat)
-    if n == 0:
-        return results
-
-    uf = UnionFind(n)
-
-    for i in range(n):
-        lat_i, lon_i, _, _ = flat[i]
-        for j in range(i + 1, n):
-            lat_j, lon_j, _, _ = flat[j]
-            if haversine_m(lat_i, lon_i, lat_j, lon_j) <= min_distance_m:
-                uf.union(i, j)
-
-    clusters = {}
-    for idx in range(n):
-        root = uf.find(idx)
-        clusters.setdefault(root, []).append(idx)
-
-    # indices that belong to clusters of size >= 2
-    keep_indices = set(
-        idx for members in clusters.values() if len(members) >= 2 for idx in members
-    )
-
-    filtered = []
-    for t_idx, tile in enumerate(results):
-        new_coords = []
-        for p_idx, coord in enumerate(tile.get("coordinates", [])):
-            flat_idx = next(
-                i for i, (_, _, ti, pi) in enumerate(flat)
-                if ti == t_idx and pi == p_idx
-            )
-            if flat_idx in keep_indices:
-                new_coords.append(coord)
-        filtered.append({
-            "bounds": tile.get("bounds"),
-            "coordinates": new_coords
-        })
-
-    return filtered
 
 
 def save_prediction_tiff(probs, bounds, out_path):
@@ -138,31 +87,7 @@ def merge_prediction_tiffs(tiff_dir, out_path, dst_crs="EPSG:4326"):
     LOGGER.info(f"Mosaic written to {out_path}")
 
 
-def haversine_m(lat1, lon1, lat2, lon2):
-    """
-    Haversine distance in meters between two (lat, lon) pairs.
-    """
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = phi2 - phi1
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2.0)**2
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
-
-class UnionFind:
-    def __init__(self, n):
-        self.parent = list(range(n))
-    def find(self, x):
-        while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
-            x = self.parent[x]
-        return x
-    def union(self, a, b):
-        ra = self.find(a); rb = self.find(b)
-        if ra != rb:
-            self.parent[rb] = ra
-
-def merge_close_points_global(results, min_distance_m=2.0):
+def merge_close_points_global(results, min_distance_m=2.0, agreement: int = 1):
     """
     Merge points across all tiles that are closer than min_distance_m.
     Returns a flat list of merged (lat, lon) centroids.
@@ -197,6 +122,12 @@ def merge_close_points_global(results, min_distance_m=2.0):
     for members in clusters.values():
         sum_lat = 0.0
         sum_lon = 0.0
+
+        # Just skip clusters that don't meet agreement threshold, if specified.
+        # Avoids entirely new functions for this simple filter.
+        if len(members) < agreement:
+            continue
+
         for m in members:
             lat, lon, _, _ = flat[m]
             sum_lat += lat
@@ -205,25 +136,6 @@ def merge_close_points_global(results, min_distance_m=2.0):
         merged.append((sum_lat / cnt, sum_lon / cnt))
     return merged
 
-def interpolate_centroid(centroid, bounds, shape):
-    """
-    Convert centroid pixel coordinates to geographic coordinates using bounds.
-    centroid: (y, x) pixel coordinates
-    bounds: dict with lat_min, lat_max, lon_min, lon_max
-    shape: (height, width) of the image
-    Returns (latitude, longitude)
-    """
-    y, x = centroid
-    height, width = shape
-    lat_min = bounds.get('lat_min')
-    lat_max = bounds.get('lat_max')
-    lon_min = bounds.get('lon_min')
-    lon_max = bounds.get('lon_max')
-    if None in (lat_min, lat_max, lon_min, lon_max):
-        raise ValueError("Missing bounds in metadata")
-    lat = lat_max - (lat_max - lat_min) * (y / height)
-    lon = lon_min + (lon_max - lon_min) * (x / width)
-    return (lat, lon)
 
 def predict_json(dataset, model, device, processing_cfg, sample_cfg=None, validation_tifs=False):
     """
@@ -401,7 +313,7 @@ def cli(config) -> None:
         pred_cfg['model'],
         model_args={"n_channels": 3, "n_classes": 1}
     )
-    validation_tifs = bool(pred_cfg.get("validation_tifs", False))
+    validation_tifs = pred_cfg.get("validation_tifs", False)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -420,20 +332,12 @@ def cli(config) -> None:
     min_distance_m = processing_cfg.get('min_distance_m', 2.0)
 
     # Only keep points with agreement between overlaps
-    agreement = bool(processing_cfg.get("agreement", False))
-
-    if agreement:
-        results = filter_points_without_agreement(
-            results,
-            min_distance_m=min_distance_m
-        )
-        LOGGER.info(
-            f"Total number of tents after agreement filter: "
-            f"{sum(len(r['coordinates']) for r in results)}"
-        )
+    agreement = processing_cfg.get("agreement", False)
+    if isinstance(agreement, bool):  # convert to int, False -> 1 point agreement, True -> 2 point agreement
+        agreement = 2 if agreement else 1
 
     # global deduplication in meters
-    merged_coords = merge_close_points_global(results, min_distance_m=min_distance_m)
+    merged_coords = merge_close_points_global(results, min_distance_m=min_distance_m, agreement=agreement)
     LOGGER.info(f"Total number of tents (post-merge): {len(merged_coords)}")
 
     # Save only the cleaned/deduplicated points (no raw points, no deduplicated flag)
