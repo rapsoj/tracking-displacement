@@ -169,7 +169,7 @@ def cli(config) -> None:
         ds, model, device, processing_cfg, sample_cfg, validation_tifs=validation_tifs
     )
     # Save only the cleaned/deduplicated points (no raw points, no deduplicated flag)
-    save_geojson(merged_coords, out_path)
+    save_geojson(results, out_path)
 
     if validation_tifs:
         tiff_dir = Path(processing_cfg.get("tiff_output_dir", "prediction_tiffs"))

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import click
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 import torch.optim as optim
 import os
 import yaml
@@ -84,7 +84,6 @@ def train(
         checkpoint = Path(checkpoint)
         LOGGER.warning("Loading model from checkpoint, ignoring model_kwargs.")
         model = SimpleCNN.from_pth(checkpoint).to(device)
-        hdf5_path_obj = Path(hdf5_path)
 
         save_loc = checkpoint.parent
     else:
@@ -95,7 +94,7 @@ def train(
     dataset = PairedImageDataset(hdf5_path, sigma=sigma)
     splits = [training_frac, validation_frac, 1 - training_frac - validation_frac]
 
-    (train_set, val_set, test_set), idcs_list = dataset.create_subsets(
+    (train_set, val_set, _), idcs_list = dataset.create_subsets(
         splits, shuffle=True, save_loc=save_loc
     )
 
@@ -112,10 +111,9 @@ def train(
         pin_memory=True,
     )
     val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
-    test_loader = DataLoader(test_set, batch_size=batch_size, collate_fn=custom_collate)
 
     LOGGER.info(
-        f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples."
+        f"Split {len(dataset)} samples into {len(train_set)} train and {len(val_set)} validation samples."
     )
 
     def criterion(x, y):
@@ -127,7 +125,6 @@ def train(
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("runs", timestamp)
     os.makedirs(run_dir, exist_ok=True)
-    # shutil.copy(hdf5_path, os.path.join(run_dir, 'dataset.h5'))
 
     # caching splits for future use
     with open(os.path.join(run_dir, "splits.csv"), "w") as split_file:

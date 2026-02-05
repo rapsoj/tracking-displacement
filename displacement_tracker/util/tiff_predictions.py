@@ -1,8 +1,14 @@
+from pathlib import Path
+
 import rasterio
 from rasterio.transform import from_bounds
 from rasterio.merge import merge
 from glob import glob
+import numpy as np
 
+from displacement_tracker.util.logging_config import setup_logging
+
+LOGGER = setup_logging("tiff-predictions")
 
 def save_prediction_tiff(probs, bounds, out_path):
     """

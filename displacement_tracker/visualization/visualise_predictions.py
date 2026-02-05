@@ -87,7 +87,7 @@ def cli(config):
             "Config must specify prediction/input and prediction/output paths"
         )
 
-    viewer = TileViewer(processed_path, predictions_path)
+    TileViewer(processed_path, predictions_path)
     plt.show(block=True)
 
 

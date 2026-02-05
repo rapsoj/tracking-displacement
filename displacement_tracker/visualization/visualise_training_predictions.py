@@ -2,7 +2,6 @@ import random
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import h5py
 from displacement_tracker.paired_image_dataset import PairedImageDataset
 from displacement_tracker.simple_cnn import SimpleCNN
 
