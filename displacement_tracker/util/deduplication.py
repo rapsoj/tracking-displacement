@@ -1,13 +1,16 @@
 from displacement_tracker.util.distance import haversine_m
 
+
 class UnionFind:
     def __init__(self, n):
         self.parent = list(range(n))
+
     def find(self, x):
         while self.parent[x] != x:
             self.parent[x] = self.parent[self.parent[x]]
             x = self.parent[x]
         return x
+
     def union(self, a, b):
         ra = self.find(a)
         rb = self.find(b)
@@ -30,7 +33,7 @@ def merge_close_points_global(flat, min_distance_m=2.0, agreement: int = 1):
     # O(n^2) pairwise merge; OK for moderate n (few thousands).
     for i in range(n):
         lat_i, lon_i = flat[i]
-        for j in range(i+1, n):
+        for j in range(i + 1, n):
             lat_j, lon_j = flat[j]
             if haversine_m(lat_i, lon_i, lat_j, lon_j) <= min_distance_m:
                 uf.union(i, j)

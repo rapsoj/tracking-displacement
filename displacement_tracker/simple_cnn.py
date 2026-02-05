@@ -4,8 +4,8 @@ import torch.nn as nn
 import torch
 import torch.nn as nn
 
-class SimpleCNN(nn.Module):
 
+class SimpleCNN(nn.Module):
     ALLOWED_KWARGS = {"kernel_size"}
 
     def __init__(self, n_channels, n_classes=1, **kwargs):
@@ -26,11 +26,15 @@ class SimpleCNN(nn.Module):
             "kernel_size": kernel_size,
         }
 
-        self.conv1 = nn.Conv2d(n_channels, 8, kernel_size=kernel_size, padding=kernel_size//2, bias=False)
+        self.conv1 = nn.Conv2d(
+            n_channels, 8, kernel_size=kernel_size, padding=kernel_size // 2, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(8)
         self.relu1 = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=kernel_size, padding=kernel_size//2, bias=False)
+        self.conv2 = nn.Conv2d(
+            8, 16, kernel_size=kernel_size, padding=kernel_size // 2, bias=False
+        )
         self.bn2 = nn.BatchNorm2d(16)
         self.relu2 = nn.ReLU(inplace=True)
 
@@ -42,11 +46,15 @@ class SimpleCNN(nn.Module):
         self.bn4 = nn.BatchNorm2d(8)
         self.relu4 = nn.ReLU(inplace=True)
 
-        self.conv5 = nn.Conv2d(8, 8, kernel_size=kernel_size, padding=kernel_size//2, bias=False)
+        self.conv5 = nn.Conv2d(
+            8, 8, kernel_size=kernel_size, padding=kernel_size // 2, bias=False
+        )
         self.bn5 = nn.BatchNorm2d(8)
         self.relu5 = nn.ReLU(inplace=True)
 
-        self.conv6 = nn.Conv2d(8, 8, kernel_size=kernel_size, padding=kernel_size//2, bias=False)
+        self.conv6 = nn.Conv2d(
+            8, 8, kernel_size=kernel_size, padding=kernel_size // 2, bias=False
+        )
         self.bn6 = nn.BatchNorm2d(8)
         self.relu6 = nn.ReLU(inplace=True)
 
@@ -94,14 +102,13 @@ class SimpleCNN(nn.Module):
         checkpoint = torch.load(file_name, map_location=map_location)
 
         model_args = model_args or {}
-        if isinstance(checkpoint, dict) and 'model_args' in checkpoint:
+        if isinstance(checkpoint, dict) and "model_args" in checkpoint:
             model_args = model_args | checkpoint["model_args"]
 
         model = cls(**model_args)
-        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
             state_dict = checkpoint["state_dict"]
         else:
             state_dict = checkpoint
         model.load_state_dict(state_dict)
         return model
-

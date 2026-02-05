@@ -6,6 +6,7 @@ import click
 
 plt.ion()  # enable interactive mode
 
+
 class TileViewer:
     def __init__(self, processed_h5_path, predictions_h5_path):
         self.processed_h5 = h5py.File(processed_h5_path, "r")
@@ -24,7 +25,9 @@ class TileViewer:
         overlay_rgb = np.zeros_like(base_rgb)
         channel = {"red": 0, "green": 1, "blue": 2}[color]
         overlay_rgb[..., channel] = overlay
-        overlay_norm = overlay_rgb / overlay_rgb.max() if overlay_rgb.max() > 0 else overlay_rgb
+        overlay_norm = (
+            overlay_rgb / overlay_rgb.max() if overlay_rgb.max() > 0 else overlay_rgb
+        )
         return (1 - alpha) * base_rgb + alpha * overlay_norm * 255
 
     def update(self):
@@ -36,9 +39,12 @@ class TileViewer:
         pred = self.predictions_h5["predictions"][tile_name][()]
 
         # ensure 2D images
-        if current.ndim > 2: current = current[0]
-        if prewar.ndim > 2: prewar = prewar[0]
-        if label.ndim > 2: label = label[0]
+        if current.ndim > 2:
+            current = current[0]
+        if prewar.ndim > 2:
+            prewar = prewar[0]
+        if label.ndim > 2:
+            label = label[0]
 
         self.axes[0].imshow(prewar, cmap="gray")
         self.axes[0].set_title("Pre-war")
@@ -56,7 +62,7 @@ class TileViewer:
         self.axes[3].set_title("Label Overlay")
         self.axes[3].axis("off")
 
-        self.fig.suptitle(f"Tile {self.index+1}/{len(self.tiles)}: {tile_name}")
+        self.fig.suptitle(f"Tile {self.index + 1}/{len(self.tiles)}: {tile_name}")
         self.fig.canvas.draw_idle()
 
     def on_key(self, event):
@@ -67,6 +73,7 @@ class TileViewer:
             self.index = (self.index - 1) % len(self.tiles)
             self.update()
 
+
 @click.command()
 @click.argument("config", type=click.Path(exists=True))
 def cli(config):
@@ -76,10 +83,13 @@ def cli(config):
     processed_path = pred_cfg.get("input")
     predictions_path = pred_cfg.get("output")
     if not processed_path or not predictions_path:
-        raise click.ClickException("Config must specify prediction/input and prediction/output paths")
+        raise click.ClickException(
+            "Config must specify prediction/input and prediction/output paths"
+        )
 
     viewer = TileViewer(processed_path, predictions_path)
     plt.show(block=True)
+
 
 if __name__ == "__main__":
     cli()

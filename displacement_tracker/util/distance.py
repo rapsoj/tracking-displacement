@@ -1,4 +1,7 @@
+import math
+
 EARTH_RADIUS_M = 6371000.0
+
 
 def haversine_m(lat1, lon1, lat2, lon2):
     """
@@ -8,8 +11,12 @@ def haversine_m(lat1, lon1, lat2, lon2):
     phi2 = math.radians(lat2)
     dphi = phi2 - phi1
     dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2.0)**2
+    a = (
+        math.sin(dphi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    )
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
 
 def interpolate_centroid(centroid, bounds, shape):
     """
@@ -21,10 +28,10 @@ def interpolate_centroid(centroid, bounds, shape):
     """
     y, x = centroid
     height, width = shape
-    lat_min = bounds.get('lat_min')
-    lat_max = bounds.get('lat_max')
-    lon_min = bounds.get('lon_min')
-    lon_max = bounds.get('lon_max')
+    lat_min = bounds.get("lat_min")
+    lat_max = bounds.get("lat_max")
+    lon_min = bounds.get("lon_min")
+    lon_max = bounds.get("lon_max")
     if None in (lat_min, lat_max, lon_min, lon_max):
         raise ValueError("Missing bounds in metadata")
     lat = lat_max - (lat_max - lat_min) * (y / height)

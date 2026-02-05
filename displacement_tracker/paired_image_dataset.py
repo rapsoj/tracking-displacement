@@ -28,20 +28,21 @@ class PairedImageDataset(Dataset):
         # Rescaled constant so that value of 1 is never exceeded, even with multiple tents together
         self.norm_constant = float(np.max(blurred_dummy)) * 2.3
 
-        LOGGER.info(f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}")
+        LOGGER.info(
+            f"Initialized PairedImageDataset with sigma={self.sigma}. Normalization constant: {self.norm_constant}"
+        )
 
         # Default feature transform: numpy array to tensor
 
-        self.h5 = h5py.File(self.hdf5_path, 'r')  # r+ supports saving of splits
-        self.greyscale_dataset = self.h5['feature']
-        self.prewar_dataset = self.h5['prewar']
-        self.label_dataset = self.h5['label']
+        self.h5 = h5py.File(self.hdf5_path, "r")  # r+ supports saving of splits
+        self.greyscale_dataset = self.h5["feature"]
+        self.prewar_dataset = self.h5["prewar"]
+        self.label_dataset = self.h5["label"]
         self.meta_dataset = self.h5["meta"]
 
     @staticmethod
     def feat_transform(arr):
         return torch.from_numpy(arr).unsqueeze(0)
-
 
     def label_transform(self, arr):
         arr = arr.astype(np.float32)
@@ -68,15 +69,21 @@ class PairedImageDataset(Dataset):
         feat = PairedImageDataset.feat_transform(grey)
         lab = self.label_transform(label_arr)
         prewar = PairedImageDataset.feat_transform(prewar)
-        return {'feature': feat, 'label': lab, 'meta': meta, "prewar": prewar}
+        return {"feature": feat, "label": lab, "meta": meta, "prewar": prewar}
 
     def label_is_negative(self, i):
         sample = self[i]
-        label = sample['label']
+        label = sample["label"]
         return (label.max() == 0).item()
 
-
-    def create_subsets(self, splits: list[float], shuffle: bool = True, save_loc: str | None = None, regenerate_splits: bool = False, seed: int | None = None) -> list["PairedImageDataset"]:
+    def create_subsets(
+        self,
+        splits: list[float],
+        shuffle: bool = True,
+        save_loc: str | None = None,
+        regenerate_splits: bool = False,
+        seed: int | None = None,
+    ) -> list["PairedImageDataset"]:
         # Todo: create a copy of this dataset in run folder, so we can keep track of cached splits
 
         if save_loc is None:
@@ -84,7 +91,6 @@ class PairedImageDataset(Dataset):
         else:
             split_file = Path(save_loc) / "splits.csv"
             cache_valid = split_file.exists() and not regenerate_splits
-
 
         idcs_list = []
         if cache_valid:
@@ -101,7 +107,6 @@ class PairedImageDataset(Dataset):
             else:
                 LOGGER.warn("Cached splits don't match args, ignoring cache")
 
-
         idcs = list(range(len(self)))
         if shuffle:
             if seed is not None:
@@ -113,15 +118,13 @@ class PairedImageDataset(Dataset):
         for i, split in enumerate(splits):
             end_idx = start_idx + int(len(self) * split)
             subset_indices = idcs[start_idx:end_idx]
-            if not cache_valid: # This means we didn't cache them
+            if not cache_valid:  # This means we didn't cache them
                 idcs_list.append(subset_indices)
             else:
                 subset_indices = idcs_list[i]
             datasets.append(
                 PairedImageDataset(
-                    self.hdf5_path,
-                    indices=subset_indices,
-                    sigma=self.sigma
+                    self.hdf5_path, indices=subset_indices, sigma=self.sigma
                 )
             )
 
@@ -129,9 +132,5 @@ class PairedImageDataset(Dataset):
 
         return datasets, idcs_list
 
-
-
     def close(self):
         self.h5.close()
-
-

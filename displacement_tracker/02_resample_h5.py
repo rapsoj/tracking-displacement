@@ -50,7 +50,9 @@ def resample_dataset(inp, out, rng_seed):
 @click.argument("config_path", type=click.Path(exists=True), default="config.yaml")
 @click.option("--inp", "cli_inp", help="Input H5 file to reading from.", default=None)
 @click.option("--out", "cli_out", help="Output H5 file to write to.", default=None)
-@click.option("--seed", "cli_seed", type=int, help="Random seed for sampling.", default=None)
+@click.option(
+    "--seed", "cli_seed", type=int, help="Random seed for sampling.", default=None
+)
 def cli(config_path, cli_inp, cli_out, cli_seed):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)

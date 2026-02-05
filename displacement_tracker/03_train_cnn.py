@@ -14,6 +14,7 @@ from displacement_tracker.util.logging_config import setup_logging
 
 LOGGER = setup_logging("train-cnn")
 
+
 class CachedDataset(torch.utils.data.Dataset):
     def __init__(self, base_ds):
         self.data = [base_ds[i] for i in range(len(base_ds))]
@@ -40,31 +41,42 @@ def custom_collate(batch):
 
     return collated_dict
 
+
 @click.command()
-@click.argument('config', type=click.Path(exists=True))
+@click.argument("config", type=click.Path(exists=True))
 def cli(config: str) -> None:
-    with open(config, 'r') as f:
+    with open(config, "r") as f:
         params = yaml.safe_load(f)
-    required = ['hdf5', 'training']
+    required = ["hdf5", "training"]
     for k in required:
         if k not in params:
             raise click.ClickException(f"Missing required config key: {k}")
-    train(
-        params['hdf5'],
-        **params['training']
-    )
+    train(params["hdf5"], **params["training"])
 
-def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_size: int, epochs: int, learning_rate: float, sigma: float = 3.0, checkpoint: str | None = None, device: str | None = None, model_kwargs: dict | None = None, memory: bool = False) -> None:
+
+def train(
+    hdf5_path: str,
+    training_frac: float,
+    validation_frac: float,
+    batch_size: int,
+    epochs: int,
+    learning_rate: float,
+    sigma: float = 3.0,
+    checkpoint: str | None = None,
+    device: str | None = None,
+    model_kwargs: dict | None = None,
+    memory: bool = False,
+) -> None:
 
     model_kwargs = model_kwargs or {}
 
     # Set device to GPU if available
     if torch.cuda.is_available() and (device is None or device == "cuda"):
-        device = torch.device('cuda')
-        LOGGER.info(f'Using GPU: {torch.cuda.get_device_name(0)}')
+        device = torch.device("cuda")
+        LOGGER.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
     elif device is None or device == "cpu":
-        device = torch.device('cpu')
-        LOGGER.info('Using CPU')
+        device = torch.device("cpu")
+        LOGGER.info("Using CPU")
     else:
         raise Exception(f"Could not find device {device}")
 
@@ -81,20 +93,30 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
 
     # Load and shuffle dataset
     dataset = PairedImageDataset(hdf5_path, sigma=sigma)
-    splits = [training_frac, validation_frac, 1-training_frac-validation_frac]
+    splits = [training_frac, validation_frac, 1 - training_frac - validation_frac]
 
-    (train_set, val_set, test_set), idcs_list = dataset.create_subsets(splits, shuffle=True, save_loc=save_loc)
+    (train_set, val_set, test_set), idcs_list = dataset.create_subsets(
+        splits, shuffle=True, save_loc=save_loc
+    )
 
     if memory:
         LOGGER.info("Caching training dataset in RAM...")
         train_set = CachedDataset(train_set)
         LOGGER.info(f"Cached {len(train_set)} training samples.")
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, collate_fn=custom_collate, num_workers=0, pin_memory=True)
+    train_loader = DataLoader(
+        train_set,
+        batch_size=batch_size,
+        collate_fn=custom_collate,
+        num_workers=0,
+        pin_memory=True,
+    )
     val_loader = DataLoader(val_set, batch_size=batch_size, collate_fn=custom_collate)
     test_loader = DataLoader(test_set, batch_size=batch_size, collate_fn=custom_collate)
 
-    LOGGER.info(f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples.")
+    LOGGER.info(
+        f"Split {len(dataset)} samples into {len(train_set)} train, {len(val_set)} validation, and {len(test_set)} test samples."
+    )
 
     def criterion(x, y):
         return torch.nn.functional.mse_loss(x, y)
@@ -102,8 +124,8 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Create timestamped run directory
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join('runs', timestamp)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join("runs", timestamp)
     os.makedirs(run_dir, exist_ok=True)
     # shutil.copy(hdf5_path, os.path.join(run_dir, 'dataset.h5'))
 
@@ -113,61 +135,75 @@ def train(hdf5_path: str, training_frac: float, validation_frac: float, batch_si
         for idcs in idcs_list:
             split_file.write(",".join([str(idx) for idx in idcs]) + "\n")
 
-    best_eval = float('inf')
+    best_eval = float("inf")
 
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
         n_train = 0
-        
+
         for i, entry in enumerate(train_loader):
             diff = entry["feature"] - entry["prewar"]
-            feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
+            feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(
+                device
+            )
             labels = entry["label"].to(device)
-        
+
             optimizer.zero_grad()
             outputs = model(feats)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-        
+
             bsz = labels.size(0)
             train_loss += loss.item() * bsz
             n_train += bsz
-            print(f"Epoch {epoch}: Completed step {i+1} / {len(train_loader)}", end="\r")
-            
+            print(
+                f"Epoch {epoch}: Completed step {i + 1} / {len(train_loader)}", end="\r"
+            )
+
         # normalize once per epoch
         train_loss /= n_train
-            
+
         # Validation loss
         model.eval()
         val_loss = 0.0
         n_val = 0
-        
+
         with torch.no_grad():
             for entry in val_loader:
                 diff = entry["feature"] - entry["prewar"]
-                feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(device)
+                feats = torch.cat((entry["feature"], entry["prewar"], diff), axis=1).to(
+                    device
+                )
                 labels = entry["label"].to(device)
-        
+
                 outputs = model(feats)
                 loss = criterion(outputs, labels)
-        
+
                 bsz = labels.size(0)
                 val_loss += loss.item() * bsz
                 n_val += bsz
-        
+
         val_loss = val_loss / n_val if n_val > 0 else 0.0
 
         if val_loss < best_eval:
-            model_path = os.path.join(run_dir, 'best_model.pth')
-            torch.save({
-                'state_dict': model.state_dict(),
-                'model_args': getattr(model, 'config', {})
-            }, model_path)
-            LOGGER.info(f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}.")
+            model_path = os.path.join(run_dir, "best_model.pth")
+            torch.save(
+                {
+                    "state_dict": model.state_dict(),
+                    "model_args": getattr(model, "config", {}),
+                },
+                model_path,
+            )
+            LOGGER.info(
+                f"Best model saved to {model_path} at epoch {epoch} with loss {val_loss} < {best_eval}."
+            )
             best_eval = val_loss
-        LOGGER.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss:.4f} - Validation Loss: {val_loss:.4f}")
+        LOGGER.info(
+            f"Epoch {epoch + 1}/{epochs} - Train Loss: {train_loss:.4f} - Validation Loss: {val_loss:.4f}"
+        )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     cli()

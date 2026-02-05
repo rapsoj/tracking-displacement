@@ -17,7 +17,9 @@ class Bounds:
     height: int = 0
 
     def contains(self, lon: float, lat: float) -> bool:
-        return (self.lon_min <= lon <= self.lon_max) and (self.lat_min <= lat <= self.lat_max)
+        return (self.lon_min <= lon <= self.lon_max) and (
+            self.lat_min <= lat <= self.lat_max
+        )
 
 
 def lonlat_dist(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -42,7 +44,9 @@ def feature_coords(feat: Dict) -> List:
     return feat.get("geometry", {}).get("coordinates", [])
 
 
-def extract_bounds_from_polygon_feature(feat: Dict, default_width: int = 0, default_height: int = 0) -> Bounds:
+def extract_bounds_from_polygon_feature(
+    feat: Dict, default_width: int = 0, default_height: int = 0
+) -> Bounds:
     geom = feat.get("geometry", {})
     coords = geom.get("coordinates")
     if geom.get("type") == "Polygon":
@@ -64,10 +68,23 @@ def extract_bounds_from_polygon_feature(feat: Dict, default_width: int = 0, defa
 
     # width/height not used anymore, but we read if provided
     props = feat.get("properties", {})
-    width = int(props.get("width", props.get("image_width", default_width))) if props else 0
-    height = int(props.get("height", props.get("image_height", default_height))) if props else 0
+    width = (
+        int(props.get("width", props.get("image_width", default_width))) if props else 0
+    )
+    height = (
+        int(props.get("height", props.get("image_height", default_height)))
+        if props
+        else 0
+    )
 
-    return Bounds(lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max, width=width, height=height)
+    return Bounds(
+        lon_min=lon_min,
+        lon_max=lon_max,
+        lat_min=lat_min,
+        lat_max=lat_max,
+        width=width,
+        height=height,
+    )
 
 
 def collect_points(fc: Dict) -> List[Tuple[float, float, Dict]]:
@@ -92,8 +109,12 @@ def collect_bounds(fc: Dict) -> List[Bounds]:
     return bounds_list
 
 
-def group_points_by_bounds(points: List[Tuple[float, float, Dict]], bounds_list: List[Bounds]) -> Dict[int, List[Tuple[float, float, Dict]]]:
-    groups: Dict[int, List[Tuple[float, float, Dict]]] = {i: [] for i in range(len(bounds_list))}
+def group_points_by_bounds(
+    points: List[Tuple[float, float, Dict]], bounds_list: List[Bounds]
+) -> Dict[int, List[Tuple[float, float, Dict]]]:
+    groups: Dict[int, List[Tuple[float, float, Dict]]] = {
+        i: [] for i in range(len(bounds_list))
+    }
     for lon, lat, props in points:
         for i, b in enumerate(bounds_list):
             if b.contains(lon, lat):
@@ -119,10 +140,14 @@ class TileStats:
         denom = self.tp + self.fp + self.fn
         precision = (self.tp / total_pred) if total_pred > 0 else 0.0
         recall = (self.tp / total_gt) if total_gt > 0 else 0.0
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        f1 = (
+            (2 * precision * recall / (precision + recall))
+            if (precision + recall) > 0
+            else 0.0
+        )
         accuracy = (self.tp / denom) if denom > 0 else 0.0
         fp_rate = (self.fp / total_pred) if total_pred > 0 else 0.0  # 1 - precision
-        fn_rate = (self.fn / total_gt) if total_gt > 0 else 0.0      # 1 - recall
+        fn_rate = (self.fn / total_gt) if total_gt > 0 else 0.0  # 1 - recall
         return {
             "tp": self.tp,
             "fp": self.fp,
@@ -136,7 +161,11 @@ class TileStats:
         }
 
 
-def match_points_per_tile_lonlat(gt_pts: List[Tuple[float, float, Dict]], pred_pts: List[Tuple[float, float, Dict]], dist_deg: float) -> TileStats:
+def match_points_per_tile_lonlat(
+    gt_pts: List[Tuple[float, float, Dict]],
+    pred_pts: List[Tuple[float, float, Dict]],
+    dist_deg: float,
+) -> TileStats:
     # Prepare coordinate lists
     gt_coords = [(lon, lat) for lon, lat, _ in gt_pts]
     pr_coords = [(lon, lat) for lon, lat, _ in pred_pts]
@@ -179,11 +208,38 @@ def match_points_per_tile_lonlat(gt_pts: List[Tuple[float, float, Dict]], pred_p
 @click.command()
 @click.argument("gt_geojson", type=click.Path(exists=True))
 @click.argument("pred_geojson", type=click.Path(exists=True))
-@click.option("--dist-deg", type=float, default=0.0005, help="Distance threshold in lon/lat degrees for matching")
-@click.option("--per-tile", is_flag=True, default=False, help="Print per-tile stats as well as overall")
-@click.option("--save-report", type=click.Path(), default=None, help="Optional path to save JSON report")
-@click.option("--global-match", is_flag=True, default=False, help="Force global evaluation of all points, ignoring tile bounds.")
-def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, save_report: Optional[str], global_match: bool):
+@click.option(
+    "--dist-deg",
+    type=float,
+    default=0.0005,
+    help="Distance threshold in lon/lat degrees for matching",
+)
+@click.option(
+    "--per-tile",
+    is_flag=True,
+    default=False,
+    help="Print per-tile stats as well as overall",
+)
+@click.option(
+    "--save-report",
+    type=click.Path(),
+    default=None,
+    help="Optional path to save JSON report",
+)
+@click.option(
+    "--global-match",
+    is_flag=True,
+    default=False,
+    help="Force global evaluation of all points, ignoring tile bounds.",
+)
+def cli(
+    gt_geojson: str,
+    pred_geojson: str,
+    dist_deg: float,
+    per_tile: bool,
+    save_report: Optional[str],
+    global_match: bool,
+):
     """
     Evaluate predictions (points + rectangular bounds) against ground-truth points using lon/lat degrees.
 
@@ -205,7 +261,10 @@ def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, sav
     # Determine evaluation mode
     do_global = global_match
     if not bounds_list and not global_match:
-        click.echo("No rectangular bounds (Polygon features) found in prediction GeoJSON. Falling back to global matching.", err=True)
+        click.echo(
+            "No rectangular bounds (Polygon features) found in prediction GeoJSON. Falling back to global matching.",
+            err=True,
+        )
         do_global = True
 
     if do_global:
@@ -215,10 +274,7 @@ def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, sav
             "mode": "global",
             "threshold_degrees": dist_deg,
             "overall": stats.to_dict(),
-            "counts": {
-                "gt_total": len(gt_points),
-                "pred_total": len(pred_points)
-            }
+            "counts": {"gt_total": len(gt_points), "pred_total": len(pred_points)},
         }
     else:
         # Tile-based matching: Only consider GT points inside prediction tiles
@@ -234,18 +290,20 @@ def cli(gt_geojson: str, pred_geojson: str, dist_deg: float, per_tile: bool, sav
             stats = match_points_per_tile_lonlat(gt_tile, pr_tile, dist_deg)
             overall.add(stats)
             if per_tile:
-                per_tile_stats.append({
-                    "tile_index": i,
-                    "bounds": {
-                        "lon_min": bounds.lon_min,
-                        "lon_max": bounds.lon_max,
-                        "lat_min": bounds.lat_min,
-                        "lat_max": bounds.lat_max,
-                    },
-                    "counts": stats.to_dict(),
-                    "num_gt_points": len(gt_tile),
-                    "num_pred_points": len(pr_tile),
-                })
+                per_tile_stats.append(
+                    {
+                        "tile_index": i,
+                        "bounds": {
+                            "lon_min": bounds.lon_min,
+                            "lon_max": bounds.lon_max,
+                            "lat_min": bounds.lat_min,
+                            "lat_max": bounds.lat_max,
+                        },
+                        "counts": stats.to_dict(),
+                        "num_gt_points": len(gt_tile),
+                        "num_pred_points": len(pr_tile),
+                    }
+                )
 
         report = {
             "mode": "tiled",

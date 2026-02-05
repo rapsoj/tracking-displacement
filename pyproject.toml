@@ -48,3 +48,8 @@ predict-json = "scrape_fa.05_predict_json:cli"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.15.0,<0.16.0)"
+]
