@@ -7,7 +7,7 @@ prewar_gaza: tiff_files/prewar_gaza.tif
 hdf5: no_labels.h5
 loading:
   files:
-    # - al_maghazi_bureij_20260101_051741_ssc4_u0002_visual_clip.tif
+    - al_maghazi_bureij_20260101_051741_ssc4_u0002_visual_clip.tif
     # - jabalia_beit_hanoun_20260101_051741_ssc4_u0001_visual_clip.tif
     # - rafah_khan_yunis_20260101_051741_ssc4_u0003_visual_clip.tif
 processing:
@@ -18,17 +18,18 @@ processing:
     min_valid_fraction: 0.9
 prediction:
   save_bounds: true
-  # input: no_labels.h5
-  input: al_maghazi_bureij_20260101_no_labels.h5
-  output: predictions_new.json
-  model: runs/20250927_211130/best_model.pth
+  input: al_maghazi_bureij_20260101_051741_ssc4_u0002_visual_clip.h5
+  output: al_maghazi_bureij_20260101.json
+  model: runs/20260129_084500/best_model.pth
   # Optional sampling configuration
   sample:
     enable: false        # set to false to run on all tiles
     size: 200           # number of random tiles to predict
     seed: 5            # optional random seed for reproducibility
   processing:
-    threshold: 1.75
+    agreement: false
+    threshold: 0.1
     min_area: 5
     min_distance_m: 3.0
-    crop_pixels: 3  # Set to kernel size
+    crop_pixels: 16  # Set to radius of total receptive field
+  validation_tifs: false # ideally set to false if sampling is false

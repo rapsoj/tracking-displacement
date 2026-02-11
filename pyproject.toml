@@ -39,12 +39,17 @@ torch = "^2.9.1"
 torchvision = "^0.24.1"
 
 [project.scripts]
-tif-loader = "scrape_fa.tif_loader:tif_loader"
-coordinate-scanner = "scrape_fa.coordinate_scanner:cli"
-train-cnn = "scrape_fa.train_cnn:cli"
-predict = "scrape_fa.predict_processed:cli"
-predict-json = "scrape_fa.predict_json:cli"
+tif-loader = "scrape_fa.01_tif_loader:tif_loader"
+coordinate-scanner = "scrape_fa.02_coordinate_scanner:cli"
+rebalance-dataset = "scrape_fa.03_rebalance_dataset:cli"
+train-cnn = "scrape_fa.04_train_cnn:cli"
+predict-json = "scrape_fa.05_predict_json:cli"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.15.0,<0.16.0)"
+]

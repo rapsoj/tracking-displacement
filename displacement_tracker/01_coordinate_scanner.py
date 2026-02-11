@@ -5,7 +5,7 @@ import json
 import math
 import os
 from collections import defaultdict
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from typing import Any
 from tqdm import tqdm
 
@@ -21,9 +21,9 @@ from rasterio.transform import xy
 from rasterio import mask
 from rasterio.io import MemoryFile
 
-from scrape_fa.util.logging_config import setup_logging
+from displacement_tracker.util.logging_config import setup_logging
 
-LOGGER = setup_logging('coordinate_scanner')
+LOGGER = setup_logging("coordinate_scanner")
 
 # The original code enforced a single tile WIDTH and HEIGHT across runs using module globals.
 # Keep that behaviour but encapsulate access through helpers so code is shorter and clearer.
@@ -31,13 +31,15 @@ WIDTH: int | None = None
 HEIGHT: int | None = None
 
 
-def _group_coords(features: list[dict[str, Any]], step: float) -> dict[tuple[float, float], list[dict[str, Any]]]:
+def _group_coords(
+    features: list[dict[str, Any]], step: float
+) -> dict[tuple[float, float], list[dict[str, Any]]]:
     grouped = defaultdict(list)
     for feat in features:
-        geom = feat.get('geometry') or {}
-        if geom.get('type') != 'Point':
+        geom = feat.get("geometry") or {}
+        if geom.get("type") != "Point":
             continue
-        coords = geom.get('coordinates') or []
+        coords = geom.get("coordinates") or []
         if len(coords) != 2:
             continue
         lon, lat = coords
@@ -48,7 +50,9 @@ def _group_coords(features: list[dict[str, Any]], step: float) -> dict[tuple[flo
             # Slightly dirty fix, easiest way to ensure all subtiles are labelled in the dataset
             # Previously, upper three subtiles had labels = 0, which caused underfitting
             for j in (-2, -1, 0, 1, 2):
-                grouped[(round(base_lon + i * step, 5), round(base_lat + j * step, 5))].append(feat)
+                grouped[
+                    (round(base_lon + i * step, 5), round(base_lat + j * step, 5))
+                ].append(feat)
     return grouped
 
 
@@ -61,7 +65,9 @@ def _parse_date_safe(s: str | None) -> date | None:
         return None
 
 
-def _filter_tents_by_target_date(features: list[dict[str, Any]], target: date) -> list[dict[str, Any]]:
+def _filter_tents_by_target_date(
+    features: list[dict[str, Any]], target: date
+) -> list[dict[str, Any]]:
     """
     Keep features that match the TIFF date by either:
       - start == target, OR
@@ -71,9 +77,9 @@ def _filter_tents_by_target_date(features: list[dict[str, Any]], target: date) -
     """
     out: list[dict[str, Any]] = []
     for f in features:
-        props = f.get('properties', {}) or {}
-        start = _parse_date_safe(props.get('date_start'))
-        end = _parse_date_safe(props.get('date_end'))
+        props = f.get("properties", {}) or {}
+        start = _parse_date_safe(props.get("date_start"))
+        end = _parse_date_safe(props.get("date_end"))
 
         if start is None:
             continue
@@ -89,13 +95,20 @@ def _filter_tents_by_target_date(features: list[dict[str, Any]], target: date) -
 
 def _extract_date_from_filename(path: str) -> str | None:
     name = os.path.splitext(os.path.basename(path))[0]
-    for part in name.split('_'):
+    for part in name.split("_"):
         if part.isdigit() and len(part) == 8:
             return part
     return None
 
 
-def _world_window(src: rasterio.io.DatasetReader, lon: float, lat: float, step: float, src_crs: Any, wgs84_crs: Any = 'EPSG:4326'):
+def _world_window(
+    src: rasterio.io.DatasetReader,
+    lon: float,
+    lat: float,
+    step: float,
+    src_crs: Any,
+    wgs84_crs: Any = "EPSG:4326",
+):
     global WIDTH, HEIGHT
     try:
         # get 4 corner coordinates (paired properly)
@@ -178,8 +191,14 @@ def _read_rgb_and_grey(src: rasterio.io.DatasetReader, window):
     return grey
 
 
-def _create_label_from_feats(lon_min: float, lat_min: float, lon_max: float, lat_max: float,
-                             feats: list[dict[str, Any]], label_shape):
+def _create_label_from_feats(
+    lon_min: float,
+    lat_min: float,
+    lon_max: float,
+    lat_max: float,
+    feats: list[dict[str, Any]],
+    label_shape,
+):
     label = np.zeros(label_shape, dtype=np.uint8)
     h, w = label.shape
     lon_span = lon_max - lon_min
@@ -188,7 +207,7 @@ def _create_label_from_feats(lon_min: float, lat_min: float, lon_max: float, lat
         return label
 
     for feat in feats:
-        feat_lon, feat_lat = feat['geometry']['coordinates']
+        feat_lon, feat_lat = feat["geometry"]["coordinates"]
         # column: left->right
         local_col = int(round((feat_lon - lon_min) / lon_span * (w - 1)))
         # row: lat decreases downward; map lat_max to row 0
@@ -214,8 +233,10 @@ def process_group(
     src_crs: Any,
     wgs84_crs: Any,
     prewar_src: rasterio.io.DatasetReader | None = None,
-    min_valid_fraction: float = 0.0,            # << added param
-) -> tuple[np.ndarray | None, np.ndarray | None, dict[str, Any] | None, np.ndarray | None]:
+    min_valid_fraction: float = 0.0,  # << added param
+) -> tuple[
+    np.ndarray | None, np.ndarray | None, dict[str, Any] | None, np.ndarray | None
+]:
     try:
         window = _world_window(src, lon, lat, step, src_crs, wgs84_crs)
         if not window:
@@ -240,7 +261,11 @@ def process_group(
         if valid_fraction < float(min_valid_fraction):
             LOGGER.debug(
                 "Skipping tile %s at lon=%s lat=%s due to low valid_fraction %.3f (< %.3f)",
-                origin_image, lon, lat, valid_fraction, min_valid_fraction
+                origin_image,
+                lon,
+                lat,
+                valid_fraction,
+                min_valid_fraction,
             )
             return None, None, None, None
 
@@ -249,29 +274,33 @@ def process_group(
 
         # compute geographic corners of the pixel window in source CRS, then transform to WGS84
         # use upper-left and lower-right pixel corners consistently
-        x_ul, y_ul = xy(src.transform, r0, c0, offset='ul')
-        x_lr, y_lr = xy(src.transform, r1 - 1, c1 - 1, offset='lr')
+        x_ul, y_ul = xy(src.transform, r0, c0, offset="ul")
+        x_lr, y_lr = xy(src.transform, r1 - 1, c1 - 1, offset="lr")
 
-        lons, lats = transform(src.crs, 'EPSG:4326', [x_ul, x_lr], [y_ul, y_lr])
+        lons, lats = transform(src.crs, "EPSG:4326", [x_ul, x_lr], [y_ul, y_lr])
         lon_min, lon_max = min(lons), max(lons)
         lat_min, lat_max = min(lats), max(lats)
 
         # create label using the exact window bounds (function expects lon_min, lat_min, lon_max, lat_max)
-        label = _create_label_from_feats(lon_min, lat_min, lon_max, lat_max, feats, grey.shape)
+        label = _create_label_from_feats(
+            lon_min, lat_min, lon_max, lat_max, feats, grey.shape
+        )
         if grey.shape != label.shape:
             LOGGER.warning(
                 "shape mismatch for %s: grey %s vs label %s; skipping tile",
-                origin_image, grey.shape, label.shape
+                origin_image,
+                grey.shape,
+                label.shape,
             )
             return None, None, None, None
 
         meta = {
-            'origin_image': origin_image,
-            'origin_date': origin_date,
-            'lon_min': lon_min,
-            'lon_max': lon_max,
-            'lat_min': lat_min,
-            'lat_max': lat_max
+            "origin_image": origin_image,
+            "origin_date": origin_date,
+            "lon_min": lon_min,
+            "lon_max": lon_max,
+            "lat_min": lat_min,
+            "lat_max": lat_max,
         }
 
         prewar_tile = None
@@ -285,14 +314,18 @@ def process_group(
                     HEIGHT = 224
 
                 # map the same WGS84 bbox into prewar CRS and index there
-                pxs, pys = transform('EPSG:4326', prewar_src.crs, [lon_min, lon_max], [lat_min, lat_max])
+                pxs, pys = transform(
+                    "EPSG:4326", prewar_src.crs, [lon_min, lon_max], [lat_min, lat_max]
+                )
                 rpre_a, cpre_a = prewar_src.index(pxs[0], pys[0])
                 rpre_b, cpre_b = prewar_src.index(pxs[1], pys[1])
                 rpre0, rpre1 = sorted([int(rpre_a), int(rpre_b)])
                 cpre0, cpre1 = sorted([int(cpre_a), int(cpre_b)])
                 # clip
-                rpre0 = max(0, rpre0); rpre1 = min(prewar_src.height, rpre1)
-                cpre0 = max(0, cpre0); cpre1 = min(prewar_src.width, cpre1)
+                rpre0 = max(0, rpre0)
+                rpre1 = min(prewar_src.height, rpre1)
+                cpre0 = max(0, cpre0)
+                cpre1 = min(prewar_src.width, cpre1)
                 if rpre0 < rpre1 and cpre0 < cpre1:
                     # enforce the same fixed canonical tile size for prewar tiles
                     w = cpre1 - cpre0
@@ -321,7 +354,9 @@ def process_group(
                         h = rpre1 - rpre0
 
                     if rpre0 < rpre1 and cpre0 < cpre1:
-                        pre_data = prewar_src.read(1, window=((rpre0, rpre1), (cpre0, cpre1)))
+                        pre_data = prewar_src.read(
+                            1, window=((rpre0, rpre1), (cpre0, cpre1))
+                        )
                         prewar_tile = pre_data.astype(np.float32)
             except Exception:
                 LOGGER.exception("Failed to build prewar tile for %s", origin_image)
@@ -341,7 +376,7 @@ def is_high_quality_tile(
     step: float,
     start_threshold: float,
     max_missing_end: float,
-    min_valid_fraction: float
+    min_valid_fraction: float,
 ) -> bool:
     """
     Checks date distributions and raster valid-pixel fraction for the tile.
@@ -350,23 +385,30 @@ def is_high_quality_tile(
     if not feats or not date_target_str:
         return False
     try:
-        date_target = datetime.strptime(date_target_str, '%Y%m%d').date()
+        date_target = datetime.strptime(date_target_str, "%Y%m%d").date()
     except Exception:
         return False
 
-    start_matches = sum(_parse_date_safe(f.get('properties', {}).get('date_start')) == date_target for f in feats)
-    missing_end = sum(_parse_date_safe(f.get('properties', {}).get('date_end')) is None for f in feats)
+    start_matches = sum(
+        _parse_date_safe(f.get("properties", {}).get("date_start")) == date_target
+        for f in feats
+    )
+    missing_end = sum(
+        _parse_date_safe(f.get("properties", {}).get("date_end")) is None for f in feats
+    )
     n = len(feats)
     if n == 0:
         return False
     if (start_matches / n) < start_threshold or (missing_end / n) > max_missing_end:
         return False
 
-    window = _world_window(src, lon, lat, step, src.crs, 'EPSG:4326')
+    window = _world_window(src, lon, lat, step, src.crs, "EPSG:4326")
     if not window:
         return False
     try:
-        data = src.read([1, 2, 3], window=((window[0], window[1]), (window[2], window[3])))
+        data = src.read(
+            [1, 2, 3], window=((window[0], window[1]), (window[2], window[3]))
+        )
         if data.size == 0:
             return False
         nodata = src.nodata
@@ -405,7 +447,9 @@ class HDF5Writer:
         self._d_prewar = None
         self._d_meta = None
 
-    def _create_datasets(self, grey: np.ndarray, label: np.ndarray, prewar: np.ndarray | None):
+    def _create_datasets(
+        self, grey: np.ndarray, label: np.ndarray, prewar: np.ndarray | None
+    ):
         h, w = grey.shape
         # chunk 1 tile per chunk so appends are efficient
         chunks = (1, h, w)
@@ -420,7 +464,7 @@ class HDF5Writer:
             maxshape=maxshape,
             chunks=chunks,
             dtype=feat_dtype,
-            compression="gzip"
+            compression="gzip",
         )
         self._d_label = self._file.create_dataset(
             "label",
@@ -428,7 +472,7 @@ class HDF5Writer:
             maxshape=maxshape,
             chunks=chunks,
             dtype=label_dtype,
-            compression="gzip"
+            compression="gzip",
         )
 
         if prewar is not None:
@@ -439,17 +483,25 @@ class HDF5Writer:
                 maxshape=(None, hp, wp),
                 chunks=(1, hp, wp),
                 dtype=prewar.dtype,
-                compression="gzip"
+                compression="gzip",
             )
         else:
             self._d_prewar = None
 
         # metadata: store as variable-length JSON strings
         dt = h5py.special_dtype(vlen=str)
-        self._d_meta = self._file.create_dataset("meta", shape=(0,), maxshape=(None,), dtype=dt, chunks=(1,))
+        self._d_meta = self._file.create_dataset(
+            "meta", shape=(0,), maxshape=(None,), dtype=dt, chunks=(1,)
+        )
         self._created = True
 
-    def add_entry(self, grey: np.ndarray, label: np.ndarray, meta: dict[str, Any], prewar: np.ndarray | None = None):
+    def add_entry(
+        self,
+        grey: np.ndarray,
+        label: np.ndarray,
+        meta: dict[str, Any],
+        prewar: np.ndarray | None = None,
+    ):
         # lazy create on first tile
         if not self._created:
             self._create_datasets(grey, label, prewar)
@@ -471,18 +523,24 @@ class HDF5Writer:
 
             if prewar is None:
                 # write an all-zero tile
-                zero_tile = np.zeros(self._d_prewar.shape[1:], dtype=self._d_prewar.dtype)
+                zero_tile = np.zeros(
+                    self._d_prewar.shape[1:], dtype=self._d_prewar.dtype
+                )
                 self._d_prewar[idx, :, :] = zero_tile
             else:
                 ph, pw = prewar.shape
                 target_h, target_w = self._d_prewar.shape[1], self._d_prewar.shape[2]
                 if (ph, pw) != (target_h, target_w):
                     # pad/crop to target shape (top-left aligned). Change alignment if desired.
-                    adjusted = np.zeros((target_h, target_w), dtype=self._d_prewar.dtype)
+                    adjusted = np.zeros(
+                        (target_h, target_w), dtype=self._d_prewar.dtype
+                    )
                     copy_h = min(ph, target_h)
                     copy_w = min(pw, target_w)
                     # cast source to dataset dtype before copy to avoid unexpected dtype promotion
-                    adjusted[:copy_h, :copy_w] = prewar[:copy_h, :copy_w].astype(self._d_prewar.dtype, copy=False)
+                    adjusted[:copy_h, :copy_w] = prewar[:copy_h, :copy_w].astype(
+                        self._d_prewar.dtype, copy=False
+                    )
                     prewar_to_write = adjusted
                 else:
                     # shapes match — ensure dtype matches dataset
@@ -515,13 +573,17 @@ def _open_raster(path: str):
         return None
 
 
-def _crop_src_to_boundaries(src: rasterio.io.DatasetReader, boundaries_path: str) -> rasterio.io.DatasetReader | None:
+def _crop_src_to_boundaries(
+    src: rasterio.io.DatasetReader, boundaries_path: str
+) -> rasterio.io.DatasetReader | None:
     try:
-        with fiona.open(boundaries_path, 'r') as shp:
-            shp_geoms = [feat['geometry'] for feat in shp]
+        with fiona.open(boundaries_path, "r") as shp:
+            shp_geoms = [feat["geometry"] for feat in shp]
             shp_crs = shp.crs
     except Exception:
-        LOGGER.exception('Failed to read boundaries shapefile; proceeding without cropping')
+        LOGGER.exception(
+            "Failed to read boundaries shapefile; proceeding without cropping"
+        )
         return src
 
     transformed = []
@@ -530,24 +592,36 @@ def _crop_src_to_boundaries(src: rasterio.io.DatasetReader, boundaries_path: str
             transformed.append(transform_geom(shp_crs, src.crs, g))
         except Exception:
             try:
-                transformed.append(transform_geom('EPSG:4326', src.crs, g))
+                transformed.append(transform_geom("EPSG:4326", src.crs, g))
             except Exception:
-                LOGGER.exception('Failed to transform a boundary geometry; skipping it')
+                LOGGER.exception("Failed to transform a boundary geometry; skipping it")
     if not transformed:
-        LOGGER.warning('No valid transformed geometries found in boundaries; skipping cropping.')
+        LOGGER.warning(
+            "No valid transformed geometries found in boundaries; skipping cropping."
+        )
         return src
     try:
         out_image, out_transform = mask.mask(src, transformed, crop=True)
     except ValueError:
-        LOGGER.info(f"No overlap between {os.path.basename(src.name)} and boundaries; skipping file.")
+        LOGGER.info(
+            f"No overlap between {os.path.basename(src.name)} and boundaries; skipping file."
+        )
         src.close()
         return None
     except Exception:
-        LOGGER.exception('Unexpected error while cropping raster; proceeding with original raster')
+        LOGGER.exception(
+            "Unexpected error while cropping raster; proceeding with original raster"
+        )
         return src
 
     out_meta = src.meta.copy()
-    out_meta.update({"height": out_image.shape[1], "width": out_image.shape[2], "transform": out_transform})
+    out_meta.update(
+        {
+            "height": out_image.shape[1],
+            "width": out_image.shape[2],
+            "transform": out_transform,
+        }
+    )
     mem = MemoryFile()
     with mem.open(**out_meta) as ds:
         ds.write(out_image)
@@ -563,7 +637,9 @@ def _crop_src_to_boundaries(src: rasterio.io.DatasetReader, boundaries_path: str
         finally:
             mem.close()
 
-    LOGGER.info(f"Cropped {os.path.basename(new_src.name)} to provided boundaries; new bounds: {new_src.bounds}")
+    LOGGER.info(
+        f"Cropped {os.path.basename(new_src.name)} to provided boundaries; new bounds: {new_src.bounds}"
+    )
     new_src.close = _close
     return new_src
 
@@ -577,7 +653,7 @@ def scan_grouped_coordinates(
     date_target: str | None,
     prewar_path: str | None = None,
     boundaries_path: str | None = None,
-    complete_list: list[str] | None = None
+    complete_list: list[str] | None = None,
 ) -> None:
     src = _open_raster(geotiff_path)
     if src is None:
@@ -592,8 +668,8 @@ def scan_grouped_coordinates(
     prewar_src = _open_raster(prewar_path) if prewar_path else None
 
     try:
-        with open(geojson_path, 'r') as f:
-            features = json.load(f).get('features', [])
+        with open(geojson_path, "r") as f:
+            features = json.load(f).get("features", [])
     except Exception:
         LOGGER.exception(f"Failed to read geojson: {geojson_path}")
         src.close()
@@ -605,15 +681,20 @@ def scan_grouped_coordinates(
     is_complete = base_name in (complete_list or [])
 
     # minimal valid-fraction threshold (0.0 preserves old behaviour)
-    min_valid = (quality_thresholds.get('min_valid_fraction', 0.0)
-                 if isinstance(quality_thresholds, dict) else 0.0)
+    min_valid = (
+        quality_thresholds.get("min_valid_fraction", 0.0)
+        if isinstance(quality_thresholds, dict)
+        else 0.0
+    )
 
     # always ensure tents match the TIFF date using start (and interval when end exists)
     if date_target:
         try:
-            date_obj = datetime.strptime(date_target, '%Y%m%d').date()
+            date_obj = datetime.strptime(date_target, "%Y%m%d").date()
             features = _filter_tents_by_target_date(features, date_obj)
-            LOGGER.info(f"[{base_name}] Filtered to {len(features)} features for date {date_target}.")
+            LOGGER.info(
+                f"[{base_name}] Filtered to {len(features)} features for date {date_target}."
+            )
         except Exception:
             LOGGER.exception(f"Date parsing error for {geotiff_path}")
             src.close()
@@ -625,10 +706,19 @@ def scan_grouped_coordinates(
     grouped = _group_coords(features, step)
 
     if is_complete:
-        LOGGER.info(f"[{base_name}] marked as COMPLETE - quality gating disabled; scanning entire raster grid.")
+        LOGGER.info(
+            f"[{base_name}] marked as COMPLETE - quality gating disabled; scanning entire raster grid."
+        )
         bounds = src.bounds
-        lon_bounds, lat_bounds = transform(src.crs, 'EPSG:4326', [bounds.left, bounds.right], [bounds.bottom, bounds.top])
-        LOGGER.info(f"[{os.path.basename(geotiff_path)}] Raster bounds (wgs84): {lon_bounds[0]}..{lon_bounds[1]} x {lat_bounds[0]}..{lat_bounds[1]}")
+        lon_bounds, lat_bounds = transform(
+            src.crs,
+            "EPSG:4326",
+            [bounds.left, bounds.right],
+            [bounds.bottom, bounds.top],
+        )
+        LOGGER.info(
+            f"[{os.path.basename(geotiff_path)}] Raster bounds (wgs84): {lon_bounds[0]}..{lon_bounds[1]} x {lat_bounds[0]}..{lat_bounds[1]}"
+        )
 
         processed_count = 0
         high_quality_found = False
@@ -651,11 +741,11 @@ def scan_grouped_coordinates(
                     lat,
                     step,
                     base_name,
-                    date_target or '',
+                    date_target or "",
                     src.crs,
-                    'EPSG:4326',
+                    "EPSG:4326",
                     prewar_src,
-                    min_valid_fraction=min_valid
+                    min_valid_fraction=min_valid,
                 )
 
                 if grey is not None and label is not None and meta is not None:
@@ -674,20 +764,39 @@ def scan_grouped_coordinates(
 
     # Incomplete TIFF: group by tent locations and apply quality gating
     grouped = _group_coords(features, step)
-    LOGGER.info(f"[{base_name}] marked as INCOMPLETE - applying quality gating from YAML.")
-    LOGGER.info(f"[{os.path.basename(geotiff_path)}] Found {len(grouped)} coordinate groups with tents.")
-    LOGGER.info(f"GeoTIFF bounds: min_lon={src.bounds.left}, min_lat={src.bounds.bottom}, max_lon={src.bounds.right}, max_lat={src.bounds.top}")
+    LOGGER.info(
+        f"[{base_name}] marked as INCOMPLETE - applying quality gating from YAML."
+    )
+    LOGGER.info(
+        f"[{os.path.basename(geotiff_path)}] Found {len(grouped)} coordinate groups with tents."
+    )
+    LOGGER.info(
+        f"GeoTIFF bounds: min_lon={src.bounds.left}, min_lat={src.bounds.bottom}, max_lon={src.bounds.right}, max_lat={src.bounds.top}"
+    )
 
     high_quality_found = False
     processed_count = 0
 
-    for (lon, lat), feats in tqdm(grouped.items(), desc=f"{base_name} processing tiles"):
+    for (lon, lat), feats in tqdm(
+        grouped.items(), desc=f"{base_name} processing tiles"
+    ):
         # incomplete TIFF: apply quality filter
-        if not is_high_quality_tile(feats, date_target, src, lon, lat, step, **quality_thresholds):
+        if not is_high_quality_tile(
+            feats, date_target, src, lon, lat, step, **quality_thresholds
+        ):
             continue
         grey, label, meta, prewar_tile = process_group(
-            src, feats, lon, lat, step, base_name, date_target or '', src.crs, 'EPSG:4326',
-            prewar_src, min_valid_fraction=min_valid
+            src,
+            feats,
+            lon,
+            lat,
+            step,
+            base_name,
+            date_target or "",
+            src.crs,
+            "EPSG:4326",
+            prewar_src,
+            min_valid_fraction=min_valid,
         )
         if grey is not None and label is not None and meta is not None:
             hdf5_writer.add_entry(grey, label, meta, prewar_tile)
@@ -709,15 +818,19 @@ def scan_all_coordinates(
     date_target: str | None,
     step: float = 0.001,
     prewar_path: str | None = None,
-    min_valid_fraction: float = 0.0
+    min_valid_fraction: float = 0.0,
 ):
     src = _open_raster(geotiff_path)
     if src is None:
         return
 
     bounds = src.bounds
-    lon_bounds, lat_bounds = transform(src.crs, 'EPSG:4326', [bounds.left, bounds.right], [bounds.bottom, bounds.top])
-    LOGGER.info(f"GeoTIFF bounds: min_lon={lon_bounds[0]}, min_lat={lat_bounds[0]}, max_lon={lon_bounds[1]}, max_lat={lat_bounds[1]}")
+    lon_bounds, lat_bounds = transform(
+        src.crs, "EPSG:4326", [bounds.left, bounds.right], [bounds.bottom, bounds.top]
+    )
+    LOGGER.info(
+        f"GeoTIFF bounds: min_lon={lon_bounds[0]}, min_lat={lat_bounds[0]}, max_lon={lon_bounds[1]}, max_lat={lat_bounds[1]}"
+    )
 
     prewar_src = _open_raster(prewar_path) if prewar_path else None
 
@@ -726,8 +839,17 @@ def scan_all_coordinates(
     for lon in lon_iter:
         for lat in lat_iter:
             grey, label, meta, prewar_img = process_group(
-                src, [], lon, lat, step, os.path.basename(geotiff_path), date_target or '',
-                src.crs, 'EPSG:4326', prewar_src, min_valid_fraction=min_valid_fraction
+                src,
+                [],
+                lon,
+                lat,
+                step,
+                os.path.basename(geotiff_path),
+                date_target or "",
+                src.crs,
+                "EPSG:4326",
+                prewar_src,
+                min_valid_fraction=min_valid_fraction,
             )
             if grey is not None and label is not None and meta is not None:
                 hdf5_writer.add_entry(grey, label, meta, prewar_img)
@@ -738,29 +860,29 @@ def scan_all_coordinates(
 
 
 @click.command()
-@click.argument('config', type=click.Path(exists=True, dir_okay=False))
+@click.argument("config", type=click.Path(exists=True, dir_okay=False))
 def cli(config):
-    with open(config, 'r') as f:
+    with open(config, "r") as f:
         params = yaml.safe_load(f)
-    for key in ('geotiff_dir', 'hdf5', 'processing'):
+    for key in ("geotiff_dir", "hdf5", "processing"):
         if key not in params:
             raise click.ClickException(f"Missing required config key: {key}")
 
-    proc = params['processing']
-    step = proc['step']
-    quality_thresholds = proc['quality_thresholds']
-    complete_list = proc.get('complete', [])  # exact filenames listed in YAML
+    proc = params["processing"]
+    step = proc["step"]
+    quality_thresholds = proc["quality_thresholds"]
+    complete_list = proc.get("complete", [])  # exact filenames listed in YAML
 
     coordinate_scanner(
-        params['geotiff_dir'],
+        params["geotiff_dir"],
         params.get("geojson"),
-        params['hdf5'],
+        params["hdf5"],
         step,
         quality_thresholds,
-        prewar_path=params.get('prewar_gaza'),
-        boundaries_path=params.get('boundaries'),
+        prewar_path=params.get("prewar_gaza"),
+        boundaries_path=params.get("boundaries"),
         complete_list=complete_list,
-        config=config
+        config=config,
     )
 
 
@@ -773,12 +895,12 @@ def coordinate_scanner(
     prewar_path: str | None = None,
     boundaries_path: str | None = None,
     complete_list: list[str] | None = None,
-    config: str | None = None
+    config: str | None = None,
 ) -> None:
     if config:
-        with open(config, 'r') as f:
+        with open(config, "r") as f:
             cfg = yaml.safe_load(f)
-        search_files = cfg.get('loading', {}).get('files', [])
+        search_files = cfg.get("loading", {}).get("files", [])
         tif_files = [
             os.path.join(geotiff_dir, f)
             for f in search_files
@@ -799,10 +921,7 @@ def coordinate_scanner(
                 continue
 
             base = os.path.splitext(os.path.basename(tif_path))[0]
-            out_h5 = os.path.join(
-                os.path.dirname(hdf5),
-                f"{base}.h5"
-            )
+            out_h5 = os.path.join(os.path.dirname(hdf5), f"{base}.h5")
 
             LOGGER.info(f"Processing {tif_path} → {out_h5}")
 
@@ -818,16 +937,10 @@ def coordinate_scanner(
                     date_target,
                     prewar_path,
                     boundaries_path,
-                    complete_list or []
+                    complete_list or [],
                 )
             else:
-                scan_all_coordinates(
-                    tif_path,
-                    writer,
-                    date_target,
-                    step,
-                    prewar_path
-                )
+                scan_all_coordinates(tif_path, writer, date_target, step, prewar_path)
 
             writer.write()
             LOGGER.info(f"Saved dataset to {out_h5}")
